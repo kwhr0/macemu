@@ -70,32 +70,9 @@ bool InitAll(const char *vmdir)
 	}
 
 #if EMULATED_68K
-	// Set CPU and FPU type (UAE emulation)
-	switch (ROMVersion) {
-		case ROM_VERSION_64K:
-		case ROM_VERSION_PLUS:
-		case ROM_VERSION_CLASSIC:
-			CPUType = 0;
-			FPUType = 0;
-			TwentyFourBitAddressing = true;
-			break;
-		case ROM_VERSION_II:
-			CPUType = PrefsFindInt32("cpu");
-			if (CPUType < 2) CPUType = 2;
-			if (CPUType > 4) CPUType = 4;
-			FPUType = PrefsFindBool("fpu") ? 1 : 0;
-			if (CPUType == 4) FPUType = 1;	// 68040 always with FPU
-			TwentyFourBitAddressing = true;
-			break;
-		case ROM_VERSION_32:
-			CPUType = PrefsFindInt32("cpu");
-			if (CPUType < 2) CPUType = 2;
-			if (CPUType > 4) CPUType = 4;
-			FPUType = PrefsFindBool("fpu") ? 1 : 0;
-			if (CPUType == 4) FPUType = 1;	// 68040 always with FPU
-			TwentyFourBitAddressing = false;
-			break;
-	}
+	CPUType = 2; // 68020
+	FPUType = 0;
+	TwentyFourBitAddressing = false;
 	CPUIs68060 = false;
 #endif
 

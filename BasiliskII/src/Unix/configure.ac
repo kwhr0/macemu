@@ -39,7 +39,7 @@ AC_ARG_ENABLE(sdl-framework-prefix,    [  --enable-sdl-framework-prefix=PFX    d
 AC_ARG_WITH(sdl1,            [  --with-sdl1             use SDL 1.x, rather than SDL 2.x [default=no]], [WANT_SDL_VERSION_MAJOR=1], [])
 
 dnl JIT compiler options.
-AC_ARG_ENABLE(jit-compiler,  [  --enable-jit-compiler   enable JIT compiler [default=yes]], [WANT_JIT=$enableval], [WANT_JIT=yes])
+AC_ARG_ENABLE(jit-compiler,  [  --enable-jit-compiler   enable JIT compiler [default=no]], [WANT_JIT=$enableval], [WANT_JIT=no])
 AC_ARG_ENABLE(jit-debug,     [  --enable-jit-debug      activate native code disassemblers [default=no]], [WANT_JIT_DEBUG=$enableval], [WANT_JIT_DEBUG=no])
 
 dnl FPU emulation core.
@@ -1582,12 +1582,12 @@ fi
 
 dnl Select appropriate CPU source and REGPARAM define.
 ASM_OPTIMIZATIONS=none
-CPUSRCS="cpuemu1.cpp cpuemu2.cpp cpuemu3.cpp cpuemu4.cpp cpuemu5.cpp cpuemu6.cpp cpuemu7.cpp cpuemu8.cpp"
+CPUSRCS=""
 
 dnl (gb) JITSRCS will be emptied later if the JIT is not available
 dnl Other platforms should define their own set of noflags file variants
 CAN_JIT=no
-JITSRCS="compemu1.cpp compemu2.cpp compemu3.cpp compemu4.cpp compemu5.cpp compemu6.cpp compemu7.cpp compemu8.cpp"
+JITSRCS=""
 
 if [[ "x$HAVE_GCC27" = "xyes" -a "x$HAVE_I386" = "xyes" ]]; then
   dnl i386 CPU
@@ -1595,7 +1595,7 @@ if [[ "x$HAVE_GCC27" = "xyes" -a "x$HAVE_I386" = "xyes" ]]; then
   if [[ "x$HAVE_GAS" = "xyes" ]]; then
     ASM_OPTIMIZATIONS=i386
     DEFINES="$DEFINES -DX86_ASSEMBLY -DOPTIMIZED_FLAGS -DSAHF_SETO_PROFITABLE"
-    JITSRCS="cpuemu1_nf.cpp cpuemu2_nf.cpp cpuemu3_nf.cpp cpuemu4_nf.cpp cpuemu5_nf.cpp cpuemu6_nf.cpp cpuemu7_nf.cpp cpuemu8_nf.cpp $JITSRCS"
+    JITSRCS="$JITSRCS"
     CAN_JIT=yes
   fi
 elif [[ "x$HAVE_GCC30" = "xyes" -a "x$HAVE_X86_64" = "xyes" ]]; then
@@ -1604,7 +1604,7 @@ elif [[ "x$HAVE_GCC30" = "xyes" -a "x$HAVE_X86_64" = "xyes" ]]; then
   if [[ "x$HAVE_GAS" = "xyes" ]]; then
     ASM_OPTIMIZATIONS="x86-64"
     DEFINES="$DEFINES -DX86_64_ASSEMBLY -DOPTIMIZED_FLAGS"
-    JITSRCS="cpuemu1_nf.cpp cpuemu2_nf.cpp cpuemu3_nf.cpp cpuemu4_nf.cpp cpuemu5_nf.cpp cpuemu6_nf.cpp cpuemu7_nf.cpp cpuemu8_nf.cpp $JITSRCS"
+    JITSRCS="$JITSRCS"
     CAN_JIT=yes
   fi
 elif [[ "x$HAVE_GCC27" = "xyes" -a "x$HAVE_SPARC" = "xyes" -a "x$HAVE_GAS" = "xyes" ]]; then
@@ -1644,7 +1644,7 @@ fi
 
 dnl Enable JIT compiler, if possible.
 if [[ "x$WANT_JIT" = "xyes" -a "x$CAN_JIT" = "xyes" ]]; then
-  JITSRCS="$JITSRCS $UAE_PATH/compiler/compemu_support.cpp $UAE_PATH/compiler/compemu_fpp.cpp compstbl.o cpustbl_nf.o"
+  JITSRCS="$JITSRCS"
   DEFINES="$DEFINES -DUSE_JIT -DUSE_JIT_FPU"
   
   if [[ "x$WANT_JIT_DEBUG" = "xyes" ]]; then
@@ -1867,9 +1867,9 @@ AC_CHECK_FUNCS(isnan isinf finite isnormal signbit)
 dnl UAE CPU sources for all non-m68k-native architectures.
 if [[ "x$WANT_NATIVE_M68K" = "xno" ]]; then
   CPUINCLUDES="-I$UAE_PATH"
-  CPUSRCS="$UAE_PATH/basilisk_glue.cpp $UAE_PATH/memory.cpp $UAE_PATH/newcpu.cpp $UAE_PATH/readcpu.cpp $FPUSRCS cpustbl.cpp cpudefs.cpp $CPUSRCS $JITSRCS"
+  CPUSRCS="basilisk_glue.cpp $CPUSRCS $JITSRCS"
   if [[ "$target_cpu" = "arm" -o "$target_cpu" = "aarch64" ]]; then
-    CPUSRCS="$CPUSRCS cpufunctbl.cpp"
+    CPUSRCS="$CPUSRCS"
 	DEFINES="$DEFINES -DUPDATE_UAE"
   fi
 fi
@@ -1881,6 +1881,11 @@ if [[ "x$HAVE_IPA" = "xyes" ]]; then
   CXXFLAGS="-LANG:std $CXXFLAGS"
   LDFLAGS="$LDFLAGS -O3 -OPT:Olimit=0 -IPA"
 fi
+
+
+CXXFLAGS="-std=c++17 -fpermissive -I.. $CXXFLAGS"
+CPUSRCS="Tiny68020.cpp $CPUSRCS"
+
 
 dnl Generate Makefile.
 AC_SUBST(DEFINES)

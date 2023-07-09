@@ -26,11 +26,9 @@
 #include "emul_op.h"
 #include "rom_patches.h"
 #include "macos_util.h"
-#include "block-alloc.hpp"
 #include "sigsegv.h"
-#include "cpu/ppc/ppc-cpu.hpp"
-#include "cpu/ppc/ppc-operations.hpp"
-#include "cpu/ppc/ppc-instructions.hpp"
+#include "ppc-bitfields.hpp"
+#include "ppc-cpu.hpp"
 #include "thunks.h"
 
 // Used for NativeOp trampolines
@@ -50,11 +48,6 @@
 #include <SDL_events.h>
 #endif
 
-#if ENABLE_MON
-#include "mon.h"
-#include "mon_disass.h"
-#endif
-
 #define DEBUG 0
 #include "debug.h"
 
@@ -67,25 +60,8 @@ extern "C" {
 #define EMUL_TIME_STATS 0
 #endif
 
-#if EMUL_TIME_STATS
-static clock_t emul_start_time;
-static uint32 interrupt_count = 0, ppc_interrupt_count = 0;
-static clock_t interrupt_time = 0;
-static uint32 exec68k_count = 0;
-static clock_t exec68k_time = 0;
-static uint32 native_exec_count = 0;
-static clock_t native_exec_time = 0;
-static uint32 macos_exec_count = 0;
-static clock_t macos_exec_time = 0;
-#endif
-
 static void enter_mon(void)
 {
-	// Start up mon in real-mode
-#if ENABLE_MON
-	const char *arg[4] = {"mon", "-m", "-r", NULL};
-	mon(3, arg);
-#endif
 }
 
 // From main_*.cpp
@@ -116,39 +92,73 @@ static KernelData * kernel_data;
 // SIGSEGV handler
 sigsegv_return_t sigsegv_handler(sigsegv_address_t, sigsegv_address_t);
 
-#if PPC_ENABLE_JIT && PPC_REENTRANT_JIT
-// Special trampolines for EmulOp and NativeOp
-static uint8 *emul_op_trampoline;
-static uint8 *native_op_trampoline;
-#endif
+void powerpc_cpu::Reset() {
+	tinyppc.SetMemoryPtr((uint8 *)VMBaseDiff);
+	tinyppc.Reset();
+}
+
+uint32 spcflags_mask;
+spinlock_t spcflags_lock;
+
+bool check_spcflags(TinyPPC *tinyppc)
+{
+	if (spcflags_test(SPCFLAG_CPU_EXEC_RETURN)) {
+		spcflags_clear(SPCFLAG_CPU_EXEC_RETURN);
+		return false;
+	}
+	if (spcflags_test(SPCFLAG_CPU_HANDLE_INTERRUPT)) {
+		spcflags_clear(SPCFLAG_CPU_HANDLE_INTERRUPT);
+		static bool processing_interrupt = false;
+		if (!processing_interrupt) {
+			processing_interrupt = true;
+			tinyppc->Interrupt();
+			processing_interrupt = false;
+		}
+	}
+	if (spcflags_test(SPCFLAG_CPU_TRIGGER_INTERRUPT)) {
+		spcflags_clear(SPCFLAG_CPU_TRIGGER_INTERRUPT);
+		spcflags_set(SPCFLAG_CPU_HANDLE_INTERRUPT);
+	}
+	return true;
+}
+
+void powerpc_cpu::execute(uint32 entry)
+{
+	pc() = entry;
+	execute_depth++;
+	tinyppc.Execute();
+	--execute_depth;
+}
+
+void powerpc_cpu::execute()
+{
+	execute(pc());
+}
+
+void powerpc_cpu::invalidate_cache_range(uintptr start, uintptr end)
+{
+}
 
 
 /**
  *		PowerPC emulator glue with special 'sheep' opcodes
  **/
 
-enum {
-	PPC_I(SHEEP) = PPC_I(MAX),
-	PPC_I(SHEEP_MAX)
-};
-
 class sheepshaver_cpu
 	: public powerpc_cpu
 {
-	void init_decoder();
-	void execute_sheep(uint32 opcode);
-
 public:
+	void execute_sheep(uint32 opcode);
 
 	// Constructor
 	sheepshaver_cpu();
 
 	// CR & XER accessors
-	uint32 get_cr() const		{ return cr().get(); }
-	void set_cr(uint32 v)		{ cr().set(v); }
-	uint32 get_xer() const		{ return xer().get(); }
-	void set_xer(uint32 v)		{ xer().set(v); }
-
+	uint32 get_cr() const		{ return tinyppc.cr; }
+	void set_cr(uint32 v)		{ tinyppc.cr = v; }
+	uint32 get_xer() const		{ return tinyppc.xer; }
+	void set_xer(uint32 v)		{ tinyppc.xer = v; }
+	
 	// Execute NATIVE_OP routine
 	void execute_native_op(uint32 native_op);
 	static void call_execute_native_op(powerpc_cpu * cpu, uint32 native_op);
@@ -166,10 +176,6 @@ public:
 	// Execute MacOS/PPC code
 	uint32 execute_macos_code(uint32 tvect, int nargs, uint32 const *args);
 
-#if PPC_ENABLE_JIT
-	// Compile one instruction
-	virtual int compile1(codegen_context_t & cg_context);
-#endif
 	// Resource manager thunk
 	void get_resource(uint32 old_get_resource);
 	static void call_get_resource(powerpc_cpu * cpu, uint32 old_get_resource);
@@ -183,31 +189,6 @@ public:
 
 sheepshaver_cpu::sheepshaver_cpu()
 {
-	init_decoder();
-
-#if PPC_ENABLE_JIT
-	if (PrefsFindBool("jit"))
-		enable_jit();
-#endif
-}
-
-void sheepshaver_cpu::init_decoder()
-{
-	static const instr_info_t sheep_ii_table[] = {
-		{ "sheep",
-		  (execute_pmf)&sheepshaver_cpu::execute_sheep,
-		  PPC_I(SHEEP),
-		  D_form, 6, 0, CFLOW_JUMP | CFLOW_TRAP
-		}
-	};
-
-	const int ii_count = sizeof(sheep_ii_table)/sizeof(sheep_ii_table[0]);
-	D(bug("SheepShaver extra decode table has %d entries\n", ii_count));
-
-	for (int i = 0; i < ii_count; i++) {
-		const instr_info_t * ii = &sheep_ii_table[i];
-		init_decoder_entry(ii);
-	}
 }
 
 /*		NativeOp instruction format:
@@ -252,16 +233,14 @@ void sheepshaver_cpu::execute_emul_op(uint32 emul_op)
 // Execute SheepShaver instruction
 void sheepshaver_cpu::execute_sheep(uint32 opcode)
 {
-//	D(bug("Extended opcode %08x at %08x (68k pc %08x)\n", opcode, pc(), gpr(24)));
 	assert((((opcode >> 26) & 0x3f) == 6) && OP_MAX <= 64 + 3);
-
 	switch (opcode & 0x3f) {
 	case 0:		// EMUL_RETURN
 		QuitEmulator();
 		break;
 
 	case 1:		// EXEC_RETURN
-		spcflags().set(SPCFLAG_CPU_EXEC_RETURN);
+		spcflags_set(SPCFLAG_CPU_EXEC_RETURN);
 		break;
 
 	case 2:		// EXEC_NATIVE
@@ -278,191 +257,6 @@ void sheepshaver_cpu::execute_sheep(uint32 opcode)
 		break;
 	}
 }
-
-// Compile one instruction
-#if PPC_ENABLE_JIT
-int sheepshaver_cpu::compile1(codegen_context_t & cg_context)
-{
-	const instr_info_t *ii = cg_context.instr_info;
-	if (ii->mnemo != PPC_I(SHEEP))
-		return COMPILE_FAILURE;
-
-	int status = COMPILE_FAILURE;
-	powerpc_dyngen & dg = cg_context.codegen;
-	uint32 opcode = cg_context.opcode;
-
-	switch (opcode & 0x3f) {
-	case 0:		// EMUL_RETURN
-		dg.gen_invoke(QuitEmulator);
-		status = COMPILE_CODE_OK;
-		break;
-
-	case 1:		// EXEC_RETURN
-		dg.gen_spcflags_set(SPCFLAG_CPU_EXEC_RETURN);
-		// Don't check for pending interrupts, we do know we have to
-		// get out of this block ASAP
-		dg.gen_exec_return();
-		status = COMPILE_EPILOGUE_OK;
-		break;
-
-	case 2: {	// EXEC_NATIVE
-		uint32 selector = NATIVE_OP_field::extract(opcode);
-		switch (selector) {
-#if !PPC_REENTRANT_JIT
-		// Filter out functions that may invoke Execute68k() or
-		// CallMacOS(), this would break reentrancy as they could
-		// invalidate the translation cache and even overwrite
-		// continuation code when we are done with them.
-		case NATIVE_PATCH_NAME_REGISTRY:
-			dg.gen_invoke(DoPatchNameRegistry);
-			status = COMPILE_CODE_OK;
-			break;
-		case NATIVE_VIDEO_INSTALL_ACCEL:
-			dg.gen_invoke(VideoInstallAccel);
-			status = COMPILE_CODE_OK;
-			break;
-		case NATIVE_VIDEO_VBL:
-			dg.gen_invoke(VideoVBL);
-			status = COMPILE_CODE_OK;
-			break;
-		case NATIVE_GET_RESOURCE:
-		case NATIVE_GET_1_RESOURCE:
-		case NATIVE_GET_IND_RESOURCE:
-		case NATIVE_GET_1_IND_RESOURCE:
-		case NATIVE_R_GET_RESOURCE: {
-			static const uint32 get_resource_ptr[] = {
-				XLM_GET_RESOURCE,
-				XLM_GET_1_RESOURCE,
-				XLM_GET_IND_RESOURCE,
-				XLM_GET_1_IND_RESOURCE,
-				XLM_R_GET_RESOURCE
-			};
-			uint32 old_get_resource = ReadMacInt32(get_resource_ptr[selector - NATIVE_GET_RESOURCE]);
-			typedef void (*func_t)(dyngen_cpu_base, uint32);
-			func_t func = &sheepshaver_cpu::call_get_resource;
-			dg.gen_invoke_CPU_im(func, old_get_resource);
-			status = COMPILE_CODE_OK;
-			break;
-		}
-#endif
-		case NATIVE_CHECK_LOAD_INVOC:
-			dg.gen_load_T0_GPR(3);
-			dg.gen_load_T1_GPR(4);
-			dg.gen_se_16_32_T1();
-			dg.gen_load_T2_GPR(5);
-			dg.gen_invoke_T0_T1_T2((void (*)(uint32, uint32, uint32))check_load_invoc);
-			status = COMPILE_CODE_OK;
-			break;
-		case NATIVE_NAMED_CHECK_LOAD_INVOC:
-			dg.gen_load_T0_GPR(3);
-			dg.gen_load_T1_GPR(4);
-			dg.gen_load_T2_GPR(5);
-			dg.gen_invoke_T0_T1_T2((void (*)(uint32, uint32, uint32))named_check_load_invoc);
-			status = COMPILE_CODE_OK;
-			break;
-		case NATIVE_NQD_SYNC_HOOK:
-			dg.gen_load_T0_GPR(3);
-			dg.gen_invoke_T0_ret_T0((uint32 (*)(uint32))NQD_sync_hook);
-			dg.gen_store_T0_GPR(3);
-			status = COMPILE_CODE_OK;
-			break;
-		case NATIVE_NQD_BITBLT_HOOK:
-			dg.gen_load_T0_GPR(3);
-			dg.gen_invoke_T0_ret_T0((uint32 (*)(uint32))NQD_bitblt_hook);
-			dg.gen_store_T0_GPR(3);
-			status = COMPILE_CODE_OK;
-			break;
-		case NATIVE_NQD_FILLRECT_HOOK:
-			dg.gen_load_T0_GPR(3);
-			dg.gen_invoke_T0_ret_T0((uint32 (*)(uint32))NQD_fillrect_hook);
-			dg.gen_store_T0_GPR(3);
-			status = COMPILE_CODE_OK;
-			break;
-		case NATIVE_NQD_UNKNOWN_HOOK:
-			dg.gen_load_T0_GPR(3);
-			dg.gen_invoke_T0_ret_T0((uint32 (*)(uint32))NQD_unknown_hook);
-			dg.gen_store_T0_GPR(3);
-			status = COMPILE_CODE_OK;
-			break;
-		case NATIVE_NQD_BITBLT:
-			dg.gen_load_T0_GPR(3);
-			dg.gen_invoke_T0((void (*)(uint32))NQD_bitblt);
-			status = COMPILE_CODE_OK;
-			break;
-		case NATIVE_NQD_INVRECT:
-			dg.gen_load_T0_GPR(3);
-			dg.gen_invoke_T0((void (*)(uint32))NQD_invrect);
-			status = COMPILE_CODE_OK;
-			break;
-		case NATIVE_NQD_FILLRECT:
-			dg.gen_load_T0_GPR(3);
-			dg.gen_invoke_T0((void (*)(uint32))NQD_fillrect);
-			status = COMPILE_CODE_OK;
-			break;
-		}
-		// Could we fully translate this NativeOp?
-		if (status == COMPILE_CODE_OK) {
-			if (!FN_field::test(opcode))
-				cg_context.done_compile = false;
-			else {
-				dg.gen_load_T0_LR_aligned();
-				dg.gen_set_PC_T0();
-				cg_context.done_compile = true;
-			}
-			break;
-		}
-#if PPC_REENTRANT_JIT
-		// Try to execute NativeOp trampoline
-		if (!FN_field::test(opcode))
-			dg.gen_set_PC_im(cg_context.pc + 4);
-		else {
-			dg.gen_load_T0_LR_aligned();
-			dg.gen_set_PC_T0();
-		}
-		dg.gen_mov_32_T0_im(selector);
-		dg.gen_jmp(native_op_trampoline);
-		cg_context.done_compile = true;
-		status = COMPILE_EPILOGUE_OK;
-		break;
-#else
-		// Invoke NativeOp handler
-		if (!FN_field::test(opcode)) {
-			typedef void (*func_t)(dyngen_cpu_base, uint32);
-			func_t func = &sheepshaver_cpu::call_execute_native_op;
-			dg.gen_invoke_CPU_im(func, selector);
-			cg_context.done_compile = false;
-			status = COMPILE_CODE_OK;
-		}
-		// Otherwise, let it generate a call to execute_sheep() which
-		// will cause necessary updates to the program counter
-		break;
-#endif
-	}
-
-	default: {	// EMUL_OP
-		uint32 emul_op = EMUL_OP_field::extract(opcode) - 3;
-#if PPC_REENTRANT_JIT
-		// Try to execute EmulOp trampoline
-		dg.gen_set_PC_im(cg_context.pc + 4);
-		dg.gen_mov_32_T0_im(emul_op);
-		dg.gen_jmp(emul_op_trampoline);
-		cg_context.done_compile = true;
-		status = COMPILE_EPILOGUE_OK;
-		break;
-#else
-		// Invoke EmulOp handler
-		typedef void (*func_t)(dyngen_cpu_base, uint32);
-		func_t func = &sheepshaver_cpu::call_execute_emul_op;
-		dg.gen_invoke_CPU_im(func, emul_op);
-		cg_context.done_compile = false;
-		status = COMPILE_CODE_OK;
-		break;
-#endif
-	}
-	}
-	return status;
-}
-#endif
 
 // Handle MacOS interrupt
 void sheepshaver_cpu::interrupt(uint32 entry)
@@ -505,13 +299,9 @@ void sheepshaver_cpu::interrupt(uint32 entry)
 	gpr(12) = trampoline.addr();
 	gpr(13) = get_cr();
 
-	// rlwimi. r7,r7,8,0,0
-	uint32 result = op_ppc_rlwimi::apply(gpr(7), 8, 0x80000000, gpr(7));
-	record_cr0(result);
-	gpr(7) = result;
-
+	tinyppc.sheepi();
 	gpr(11) = 0xf072; // MSR (SRR1)
-	cr().set((gpr(11) & 0x0fff0000) | (get_cr() & ~0x0fff0000));
+	set_cr((gpr(11) & 0x0fff0000) | (get_cr() & ~0x0fff0000));
 
 	// Enter nanokernel
 	execute(entry);
@@ -561,7 +351,7 @@ void sheepshaver_cpu::execute_68k(uint32 entry, M68kRegisters *r)
 #endif
 
 	// Setup registers for 68k emulator
-	cr().set(CR_SO_field<2>::mask());			// Supervisor mode
+	set_cr(CR_SO_field<2>::mask());			// Supervisor mode
 	for (int i = 0; i < 8; i++)					// d[0]..d[7]
 	  gpr(8 + i) = r->d[i];
 	for (int i = 0; i < 7; i++)					// a[0]..a[6]
@@ -723,7 +513,11 @@ inline void sheepshaver_cpu::get_resource(uint32 old_get_resource)
  **/
 
 // PowerPC CPU emulator
-static sheepshaver_cpu *ppc_cpu = NULL;
+sheepshaver_cpu *ppc_cpu = NULL;
+
+void execute_sheep(uint32 opcode) {
+	ppc_cpu->execute_sheep(opcode);
+}
 
 void FlushCodeCache(uintptr start, uintptr end)
 {
@@ -734,13 +528,13 @@ void FlushCodeCache(uintptr start, uintptr end)
 // Dump PPC registers
 static void dump_registers(void)
 {
-	ppc_cpu->dump_registers();
+//	ppc_cpu->dump_registers();
 }
 
 // Dump log
 static void dump_log(void)
 {
-	ppc_cpu->dump_log();
+//	ppc_cpu->dump_log();
 }
 
 static int read_mem(bfd_vma memaddr, bfd_byte *myaddr, int length, struct disassemble_info *info)
@@ -819,6 +613,7 @@ sigsegv_return_t sigsegv_handler(sigsegv_info_t *sip)
 		// Ignore all other faults, if requested
 		if (PrefsFindBool("ignoresegv"))
 			return SIGSEGV_RETURN_SKIP_INSTRUCTION;
+		ppc_cpu->tinyppc.StopTrace();
 	}
 #else
 #error "FIXME: You don't have the capability to skip instruction within signal handlers"
@@ -848,19 +643,8 @@ void init_emul_ppc(void)
 
 	// Initialize main CPU emulator
 	ppc_cpu = new sheepshaver_cpu();
-	ppc_cpu->set_register(powerpc_registers::GPR(3), any_register((uint32)ROMBase + 0x30d000));
-	ppc_cpu->set_register(powerpc_registers::GPR(4), any_register(KernelDataAddr + 0x1000));
+	ppc_cpu->Reset();
 	WriteMacInt32(XLM_RUN_MODE, MODE_68K);
-
-#if ENABLE_MON
-	// Install "regs" command in cxmon
-	mon_add_command("regs", dump_registers, "regs                     Dump PowerPC registers\n");
-	mon_add_command("log", dump_log, "log                      Dump PowerPC emulation log\n");
-#endif
-
-#if EMUL_TIME_STATS
-	emul_start_time = clock();
-#endif
 }
 
 /*
@@ -869,61 +653,9 @@ void init_emul_ppc(void)
 
 void exit_emul_ppc(void)
 {
-#if EMUL_TIME_STATS
-	clock_t emul_end_time = clock();
-
-	printf("### Statistics for SheepShaver emulation parts\n");
-	const clock_t emul_time = emul_end_time - emul_start_time;
-	printf("Total emulation time : %.1f sec\n", double(emul_time) / double(CLOCKS_PER_SEC));
-	printf("Total interrupt count: %d (%2.1f Hz)\n", interrupt_count,
-		   (double(interrupt_count) * CLOCKS_PER_SEC) / double(emul_time));
-	printf("Total ppc interrupt count: %d (%2.1f %%)\n", ppc_interrupt_count,
-		   (double(ppc_interrupt_count) * 100.0) / double(interrupt_count));
-
-#define PRINT_STATS(LABEL, VAR_PREFIX) do {								\
-		printf("Total " LABEL " count : %d\n", VAR_PREFIX##_count);		\
-		printf("Total " LABEL " time  : %.1f sec (%.1f%%)\n",			\
-			   double(VAR_PREFIX##_time) / double(CLOCKS_PER_SEC),		\
-			   100.0 * double(VAR_PREFIX##_time) / double(emul_time));	\
-	} while (0)
-
-	PRINT_STATS("Execute68k[Trap] execution", exec68k);
-	PRINT_STATS("NativeOp execution", native_exec);
-	PRINT_STATS("MacOS routine execution", macos_exec);
-
-#undef PRINT_STATS
-	printf("\n");
-#endif
-
 	delete ppc_cpu;
 	ppc_cpu = NULL;
 }
-
-#if PPC_ENABLE_JIT && PPC_REENTRANT_JIT
-// Initialize EmulOp trampolines
-void init_emul_op_trampolines(basic_dyngen & dg)
-{
-	typedef void (*func_t)(dyngen_cpu_base, uint32);
-	func_t func;
-
-	// EmulOp
-	emul_op_trampoline = dg.gen_start();
-	func = &sheepshaver_cpu::call_execute_emul_op;
-	dg.gen_invoke_CPU_T0(func);
-	dg.gen_exec_return();
-	dg.gen_end();
-
-	// NativeOp
-	native_op_trampoline = dg.gen_start();
-	func = &sheepshaver_cpu::call_execute_native_op;
-	dg.gen_invoke_CPU_T0(func);	
-	dg.gen_exec_return();
-	dg.gen_end();
-
-	D(bug("EmulOp trampoline:   %p\n", emul_op_trampoline));
-	D(bug("NativeOp trampoline: %p\n", native_op_trampoline));
-}
-#endif
 
 /*
  *  Emulation loop
@@ -931,9 +663,6 @@ void init_emul_op_trampolines(basic_dyngen & dg)
 
 void emul_ppc(uint32 entry)
 {
-#if 0
-	ppc_cpu->start_log();
-#endif
 	// start emulation loop and enable code translation or caching
 	ppc_cpu->execute(entry);
 }
@@ -945,16 +674,12 @@ void emul_ppc(uint32 entry)
 void TriggerInterrupt(void)
 {
 	idle_resume();
-#if 0
-  WriteMacInt32(0x16a, ReadMacInt32(0x16a) + 1);
-#else
   // Trigger interrupt to main cpu only
   if (ppc_cpu)
 	  ppc_cpu->trigger_interrupt();
-#endif
 }
 
-void HandleInterrupt(powerpc_registers *r)
+void HandleInterrupt(RegTmp *r)
 {
 #ifdef USE_SDL_VIDEO
 	// We must fill in the events queue in the same thread that did call SDL_SetVideoMode()
@@ -975,7 +700,7 @@ void HandleInterrupt(powerpc_registers *r)
 	case MODE_68K:
 		// 68k emulator active, trigger 68k interrupt level 1
 		WriteMacInt16(ReadMacInt32(KERNEL_DATA_BASE + 0x67c), 1);
-		r->cr.set(r->cr.get() | ReadMacInt32(KERNEL_DATA_BASE + 0x674));
+		r->cr |= ReadMacInt32(KERNEL_DATA_BASE + 0x674);
 		break;
     
 #if INTERRUPTS_IN_NATIVE_MODE

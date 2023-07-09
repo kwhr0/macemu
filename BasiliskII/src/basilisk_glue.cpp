@@ -19,19 +19,13 @@
  */
 
 #include "sysdeps.h"
-
 #include "cpu_emulation.h"
-#include "main.h"
-#include "prefs.h"
 #include "emul_op.h"
-#include "rom_patches.h"
 #include "timer.h"
-#include "m68k.h"
-#include "memory.h"
-#include "readcpu.h"
-#include "newcpu.h"
-#include "compiler/compemu.h"
+#include "spcflags.h"
 
+#include "Tiny68020.h"
+Tiny68020 tiny68020;
 
 // RAM and ROM pointers
 uint32 RAMBaseMac = 0;		// RAM base (Mac address space) gb-- initializer is important
@@ -52,17 +46,12 @@ int MacFrameLayout;			// Frame buffer layout
 uintptr MEMBaseDiff;		// Global offset between a Mac address and its Host equivalent
 #endif
 
-#if USE_JIT
-bool UseJIT = false;
-#endif
-
-// #if defined(ENABLE_EXCLUSIVE_SPCFLAGS) && !defined(HAVE_HARDWARE_LOCKS)
+uae_u32 spcflags;
 B2_mutex *spcflags_lock = NULL;
-// #endif
 
 // From newcpu.cpp
 extern int quit_program;
-
+void m68k_execute(void);
 
 /*
  *  Initialize 680x0 emulation, CheckROM() must have been called first
@@ -100,13 +89,6 @@ bool Init680x0(void)
 	}
 	memory_init();
 #endif
-
-	init_m68k();
-#if USE_JIT
-	UseJIT = compiler_use_jit();
-	if (UseJIT)
-	    compiler_init();
-#endif
 	return true;
 }
 
@@ -117,11 +99,6 @@ bool Init680x0(void)
 
 void Exit680x0(void)
 {
-#if USE_JIT
-    if (UseJIT)
-	compiler_exit();
-#endif
-	exit_m68k();
 }
 
 
@@ -142,12 +119,7 @@ void InitFrameBufferMapping(void)
 
 void Start680x0(void)
 {
-	m68k_reset();
-#if USE_JIT
-    if (UseJIT)
-	m68k_compile_execute();
-    else
-#endif
+	tiny68020.Reset();
 	m68k_execute();
 }
 
@@ -164,8 +136,6 @@ void TriggerInterrupt(void)
 
 void TriggerNMI(void)
 {
-	//!! not implemented yet
-	// SPCFLAGS_SET( SPCFLAG_BRK ); // use _BRK for NMI
 }
 
 
@@ -186,42 +156,7 @@ int intlev(void)
 
 void Execute68kTrap(uint16 trap, struct M68kRegisters *r)
 {
-	int i;
-
-	// Save old PC
-	uaecptr oldpc = m68k_getpc();
-
-	// Set registers
-	for (i=0; i<8; i++)
-		m68k_dreg(regs, i) = r->d[i];
-	for (i=0; i<7; i++)
-		m68k_areg(regs, i) = r->a[i];
-
-	// Push trap and EXEC_RETURN on stack
-	m68k_areg(regs, 7) -= 2;
-	put_word(m68k_areg(regs, 7), M68K_EXEC_RETURN);
-	m68k_areg(regs, 7) -= 2;
-	put_word(m68k_areg(regs, 7), trap);
-
-	// Execute trap
-	m68k_setpc(m68k_areg(regs, 7));
-	fill_prefetch_0();
-	quit_program = 0;
-	m68k_execute();
-
-	// Clean up stack
-	m68k_areg(regs, 7) += 4;
-
-	// Restore old PC
-	m68k_setpc(oldpc);
-	fill_prefetch_0();
-
-	// Get registers
-	for (i=0; i<8; i++)
-		r->d[i] = m68k_dreg(regs, i);
-	for (i=0; i<7; i++)
-		r->a[i] = m68k_areg(regs, i);
-	quit_program = 0;
+	tiny68020.execsub(trap, *r, true);
 }
 
 
@@ -233,53 +168,62 @@ void Execute68kTrap(uint16 trap, struct M68kRegisters *r)
 
 void Execute68k(uint32 addr, struct M68kRegisters *r)
 {
-	int i;
-
-	// Save old PC
-	uaecptr oldpc = m68k_getpc();
-
-	// Set registers
-	for (i=0; i<8; i++)
-		m68k_dreg(regs, i) = r->d[i];
-	for (i=0; i<7; i++)
-		m68k_areg(regs, i) = r->a[i];
-
-	// Push EXEC_RETURN and faked return address (points to EXEC_RETURN) on stack
-	m68k_areg(regs, 7) -= 2;
-	put_word(m68k_areg(regs, 7), M68K_EXEC_RETURN);
-	m68k_areg(regs, 7) -= 4;
-	put_long(m68k_areg(regs, 7), m68k_areg(regs, 7) + 4);
-
-	// Execute routine
-	m68k_setpc(addr);
-	fill_prefetch_0();
-	quit_program = 0;
-	m68k_execute();
-
-	// Clean up stack
-	m68k_areg(regs, 7) += 2;
-
-	// Restore old PC
-	m68k_setpc(oldpc);
-	fill_prefetch_0();
-
-	// Get registers
-	for (i=0; i<8; i++)
-		r->d[i] = m68k_dreg(regs, i);
-	for (i=0; i<7; i++)
-		r->a[i] = m68k_areg(regs, i);
-	quit_program = 0;
+	tiny68020.execsub(addr, *r, false);
 }
 
-void report_double_bus_error()
+
+int quit_program = 0;
+
+void m68k_emulop_return(void)
 {
-#if 0
-	panicbug("CPU: Double bus fault detected !");
-	/* would be cool to open SDL dialog here: */
-	/* [Double bus fault detected. The emulated system crashed badly.
-	    Do you want to reset ARAnyM or quit ?] [Reset] [Quit]"
-	*/
-	panicbug(CPU_MSG);
-	CPU_ACTION;
-#endif
+	SPCFLAGS_SET( SPCFLAG_BRK );
+	quit_program = 1;
+}
+
+void m68k_emulop(uae_u32 opcode)
+{
+	struct M68kRegisters r;
+	tiny68020.exportRegs(r);
+	EmulOp(opcode, &r);
+	tiny68020.importRegs(r);
+}
+
+int m68k_do_specialties(void)
+{
+	if (SPCFLAGS_TEST( SPCFLAG_DOINT )) {
+		SPCFLAGS_CLEAR( SPCFLAG_DOINT );
+		int intr = intlev();
+		if (intr != -1)
+			tiny68020.IRQ(intr);
+	}
+
+	if (SPCFLAGS_TEST( SPCFLAG_INT )) {
+		SPCFLAGS_CLEAR( SPCFLAG_INT );
+		SPCFLAGS_SET( SPCFLAG_DOINT );
+	}
+
+	if (SPCFLAGS_TEST( SPCFLAG_BRK )) {
+		SPCFLAGS_CLEAR( SPCFLAG_BRK );
+		return 1;
+	}
+
+	return 0;
+}
+
+void m68k_execute (void)
+{
+setjmpagain:
+	TRY(prb) {
+		for (;;) {
+			if (quit_program > 0) {
+				if (quit_program == 1)
+					break;
+				quit_program = 0;
+			}
+			tiny68020.Execute();
+		}
+	}
+	CATCH(prb) {
+		goto setjmpagain;
+	}
 }

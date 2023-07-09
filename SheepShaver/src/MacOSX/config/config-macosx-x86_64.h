@@ -12,7 +12,7 @@
 #define EMULATED_PPC 1
 
 /* Define to enable dyngen engine */
-#define ENABLE_DYNGEN 1
+#define ENABLE_DYNGEN 0
 
 /* Define is using ESD. */
 /* #undef ENABLE_ESD */
@@ -406,7 +406,7 @@
 /* #undef HOST_FLOAT_WORDS_BIG_ENDIAN */
 
 /* Define constant offset for Mac address translation */
-/* #undef NATMEM_OFFSET */
+#define NATMEM_OFFSET 0x10000000
 
 /* Define to the address where bug reports for this package should be sent. */
 #define PACKAGE_BUGREPORT "Christian.Bauer@uni-mainz.de"

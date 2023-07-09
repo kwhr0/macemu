@@ -33,36 +33,23 @@ enum {
 	SPCFLAG_JIT_EXEC_RETURN			= 1 << 4,	// Return from compiled code
 };
 
-class basic_spcflags
-{
-	uint32 mask;
-	spinlock_t lock;
+extern uint32 spcflags_mask;
+extern spinlock_t spcflags_lock;
 
-public:
-
-	basic_spcflags()
-		{ init(); }
-
-	void init()
-		{ mask = 0; lock = SPIN_LOCK_UNLOCKED; }
-
-	bool empty() const
-		{ return (mask == 0); }
-
-	bool test(uint32 v) const
-		{ return (mask & v); }
-
-	void init(uint32 v)
-		{ spin_lock(&lock); mask = v; spin_unlock(&lock); }
-
-	uint32 get() const
-		{ return mask; }
-
-	void set(uint32 v)
-		{ spin_lock(&lock); mask |= v; spin_unlock(&lock); }
-
-	void clear(uint32 v)
-		{ spin_lock(&lock); mask &= ~v; spin_unlock(&lock); }
-};
+static inline void spcflags_init() {
+	spcflags_mask = 0; spcflags_lock = SPIN_LOCK_UNLOCKED;
+}
+static inline bool spcflags_empty() {
+	return !spcflags_mask;
+}
+static inline bool spcflags_test(uint32 v) {
+	return spcflags_mask & v;
+}
+static inline void spcflags_set(uint32 v) {
+	spin_lock(&spcflags_lock); spcflags_mask |= v; spin_unlock(&spcflags_lock);
+}
+static inline void spcflags_clear(uint32 v) {
+	spin_lock(&spcflags_lock); spcflags_mask &= ~v; spin_unlock(&spcflags_lock);
+}
 
 #endif /* SPCFLAGS_H */

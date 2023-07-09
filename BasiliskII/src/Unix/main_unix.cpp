@@ -94,6 +94,9 @@ using std::string;
 #include "sigsegv.h"
 #include "rpc.h"
 
+#include "Tiny68020.h"
+extern Tiny68020 tiny68020;
+
 #if USE_JIT
 #ifdef UPDATE_UAE
 extern void (*flush_icache)(void); // from compemu_support.cpp
@@ -280,40 +283,6 @@ static sigsegv_return_t sigsegv_handler(sigsegv_info_t *sip)
 #endif
 
 	return SIGSEGV_RETURN_FAILURE;
-}
-
-/*
- *  Dump state when everything went wrong after a SEGV
- */
-
-static void sigsegv_dump_state(sigsegv_info_t *sip)
-{
-	const sigsegv_address_t fault_address = sigsegv_get_fault_address(sip);
-	const sigsegv_address_t fault_instruction = sigsegv_get_fault_instruction_address(sip);
-	fprintf(stderr, "Caught SIGSEGV at address %p", fault_address);
-	if (fault_instruction != SIGSEGV_INVALID_ADDRESS)
-		fprintf(stderr, " [IP=%p]", fault_instruction);
-	fprintf(stderr, "\n");
-#if EMULATED_68K
-	uaecptr nextpc;
-#ifdef UPDATE_UAE
-	extern void m68k_dumpstate(FILE *, uaecptr *nextpc);
-	m68k_dumpstate(stderr, &nextpc);
-#else
-	extern void m68k_dumpstate(uaecptr *nextpc);
-	m68k_dumpstate(&nextpc);
-#endif
-#endif
-#if USE_JIT && JIT_DEBUG
-	extern void compiler_dumpstate(void);
-	compiler_dumpstate();
-#endif
-	VideoQuitFullScreen();
-#ifdef ENABLE_MON
-	const char *arg[4] = {"mon", "-m", "-r", NULL};
-	mon(3, arg);
-#endif
-	QuitEmulator();
 }
 
 
@@ -596,7 +565,7 @@ int main(int argc, char **argv)
 	}
 	
 	// Register dump state function when we got mad after a segfault
-	sigsegv_set_dump_state(sigsegv_dump_state);
+	//sigsegv_set_dump_state(sigsegv_dump_state);
 
 	// Read RAM size
 	RAMSize = PrefsFindInt32("ramsize");
@@ -719,35 +688,6 @@ int main(int argc, char **argv)
 		close(rom_fd);
 		QuitEmulator();
 	}
-
-#if !EMULATED_68K
-	// Get CPU model
-	int mib[2] = {CTL_HW, HW_MODEL};
-	char *model;
-	size_t model_len;
-	sysctl(mib, 2, NULL, &model_len, NULL, 0);
-	model = (char *)malloc(model_len);
-	sysctl(mib, 2, model, &model_len, NULL, 0);
-	D(bug("Model: %s\n", model));
-
-	// Set CPU and FPU type
-	CPUIs68060 = false;
-	if (strstr(model, "020"))
-		CPUType = 2;
-	else if (strstr(model, "030"))
-		CPUType = 3;
-	else if (strstr(model, "040"))
-		CPUType = 4;
-	else if (strstr(model, "060")) {
-		CPUType = 4;
-		CPUIs68060 = true;
-	} else {
-		printf("WARNING: Cannot detect CPU type, assuming 68020\n");
-		CPUType = 2;
-	}
-	FPUType = 1;	// NetBSD has an FPU emulation, so the FPU ought to be available at all times
-	TwentyFourBitAddressing = false;
-#endif
 
 	// Initialize everything
 	if (!InitAll(vmdir))
@@ -888,7 +828,7 @@ int main(int argc, char **argv)
 	xpram_thread_active = (pthread_create(&xpram_thread, NULL, xpram_func, NULL) == 0);
 	D(bug("XPRAM thread started\n"));
 #endif
-
+	tiny68020.SetMemoryPtr(RAMBaseHost);
 	// Start 68k and jump to ROM boot routine
 	D(bug("Starting emulation...\n"));
 	Start680x0();
@@ -1015,31 +955,6 @@ void FlushCodeCache(void *start, uint32 size)
 	m68k_sync_icache(start, size);
 #endif
 }
-
-
-/*
- *  SIGINT handler, enters mon
- */
-
-#ifdef ENABLE_MON
-static void sigint_handler(...)
-{
-#if EMULATED_68K
-	uaecptr nextpc;
-#ifdef UPDATE_UAE
-	extern void m68k_dumpstate(FILE *, uaecptr *nextpc);
-	m68k_dumpstate(stderr, &nextpc);
-#else
-	extern void m68k_dumpstate(uaecptr *nextpc);
-	m68k_dumpstate(&nextpc);
-#endif
-#endif
-	VideoQuitFullScreen();
-	const char *arg[4] = {"mon", "-m", "-r", NULL};
-	mon(3, arg);
-	QuitEmulator();
-}
-#endif
 
 
 #ifdef HAVE_PTHREADS

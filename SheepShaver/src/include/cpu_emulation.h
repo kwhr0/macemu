@@ -59,7 +59,7 @@ extern uint8 *ROMBaseHost;		// Base address of Mac ROM (host address space)
 
 // Mac memory access functions
 #if EMULATED_PPC
-#include "cpu/vm.hpp"
+#include "vm.hpp"
 static inline uint32 ReadMacInt8(uint32 addr) {return vm_read_memory_1(addr);}
 static inline void WriteMacInt8(uint32 addr, uint32 v) {vm_write_memory_1(addr, v);}
 static inline uint32 ReadMacInt16(uint32 addr) {return vm_read_memory_2(addr);}

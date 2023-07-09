@@ -29,7 +29,7 @@ case $target_os in
 esac
 
 dnl Options.
-AC_ARG_ENABLE(jit,          [  --enable-jit            enable JIT compiler [default=yes]], [WANT_JIT=$enableval], [WANT_JIT=yes])
+AC_ARG_ENABLE(jit,          [  --enable-jit            enable JIT compiler [default=no]], [WANT_JIT=$enableval], [WANT_JIT=no])
 AC_ARG_ENABLE(ppc-emulator, [  --enable-ppc-emulator   use the selected PowerPC emulator [default=auto]], [WANT_EMULATED_PPC=$enableval], [WANT_EMULATED_PPC=auto])
 AC_ARG_ENABLE(fbdev-dga,    [  --enable-fbdev-dga      use direct frame buffer access via /dev/fb0 [default=yes]], [WANT_FBDEV_DGA=$enableval], [WANT_FBDEV_DGA=yes])
 AC_ARG_ENABLE(xf86-dga,     [  --enable-xf86-dga       use the XFree86 DGA extension [default=yes]], [WANT_XF86_DGA=$enableval], [WANT_XF86_DGA=yes])
@@ -1506,15 +1506,7 @@ fi
 
 dnl CPU emulator sources
 if [[ "x$EMULATED_PPC" = "xyes" ]]; then
-  CPUSRCS="\
-    ../kpx_cpu/src/mathlib/ieeefp.cpp \
-    ../kpx_cpu/src/mathlib/mathlib.cpp \
-    ../kpx_cpu/src/cpu/ppc/ppc-cpu.cpp \
-    ../kpx_cpu/src/cpu/ppc/ppc-decode.cpp \
-    ../kpx_cpu/src/cpu/ppc/ppc-execute.cpp \
-    ../kpx_cpu/src/cpu/ppc/ppc-translate.cpp \
-    ../kpx_cpu/src/utils/utils-cpuinfo.cpp"
-  CPPFLAGS="$CPPFLAGS -I../kpx_cpu/include -I../kpx_cpu/src"
+  CPUSRCS="TinyPPC.cpp"
 
   dnl Enable JIT compiler, if possible
   if [[ "x$WANT_JIT" = "xyes" ]]; then
@@ -1679,6 +1671,8 @@ if [[ -n "$LINKER_SCRIPT_FLAGS" ]]; then
 fi
 AC_TRANSLATE_DEFINE(HAVE_LINKER_SCRIPT, "$ac_cv_linker_script_works",
   [Define if there is a linker script to relocate the executable above 0x70000000.])
+
+CXXFLAGS="-std=c++17 -I.. $CXXFLAGS"
 
 dnl Generate Makefile.
 AC_SUBST(PERL)

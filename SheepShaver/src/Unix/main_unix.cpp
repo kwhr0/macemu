@@ -112,7 +112,6 @@
 #include "user_strings.h"
 #include "vm_alloc.h"
 #include "sigsegv.h"
-#include "sigregs.h"
 #include "rpc.h"
 
 #define DEBUG 0
@@ -197,7 +196,7 @@ uint8 *ROMBaseHost;		// Base address of Mac ROM (host address space)
 uint32 ROMEnd;
 
 #if defined(__APPLE__) && defined(__x86_64__)
-uint8 gZeroPage[0x3000], gKernelData[0x2000];
+//uint8 gZeroPage[0x3000], gKernelData[0x2000];
 #endif
 
 // Global variables
@@ -254,10 +253,8 @@ uintptr SheepMem::data;						// Top of SheepShaver data (stack like storage)
 
 
 // Prototypes
-#if !defined(__APPLE__) || !defined(__x86_64__)
 static bool kernel_data_init(void);
 static bool shm_map_address(int kernel_area, uint32 addr);
-#endif
 static void Quit(void);
 static void *emul_func(void *arg);
 static void *nvram_func(void *arg);
@@ -406,7 +403,7 @@ static void get_system_info(void)
 	TimebaseSpeed =  25000000;	// Default:  25MHz
 
 #if EMULATED_PPC
-	PVR = 0x000c0000;			// Default: 7400 (with AltiVec)
+//	PVR = 0x000c0000;			// Default: 7400 (with AltiVec)
 	int pref_cpu_clock = PrefsFindInt32("cpuclock");
 	if (pref_cpu_clock) CPUClockSpeed = 1000000 * pref_cpu_clock;
 #elif defined(__APPLE__) && defined(__MACH__)
@@ -930,11 +927,11 @@ int main(int argc, char **argv)
 		goto quit;
 	}
 
-#if !defined(__APPLE__) || !defined(__x86_64__)
+//#if !defined(__APPLE__) || !defined(__x86_64__)
 	// Create areas for Kernel Data
 	if (!kernel_data_init())
 		goto quit;
-#endif
+//#endif
 	kernel_data = (KernelData *)Mac2HostAddr(KERNEL_DATA_BASE);
 	emulator_data = &kernel_data->ed;
 	KernelDataAddr = KERNEL_DATA_BASE;
@@ -1235,7 +1232,7 @@ static void Quit(void)
 	exit(0);
 }
 
-#if !defined(__APPLE__) || !defined(__x86_64__)
+//#if !defined(__APPLE__) || !defined(__x86_64__)
 /*
  *  Initialize Kernel Data segments
  */
@@ -1275,7 +1272,7 @@ static bool shm_map_address(int kernel_area, uint32 addr)
 	void *kernel_addr = Mac2HostAddr(addr);
 	return shmat(kernel_area, kernel_addr, 0) == kernel_addr;
 }
-#endif  // !defined(__APPLE__) || !defined(__x86_64__)
+//#endif  // !defined(__APPLE__) || !defined(__x86_64__)
 
 
 /*
@@ -1448,50 +1445,6 @@ static void *tick_func(void *arg)
 		else if (delay < -16625)
 			next = GetTicks_usec();
 		ticks++;
-
-#if !EMULATED_PPC
-		// Did we crash?
-		if (emul_thread_fatal) {
-
-			// Yes, dump registers
-			sigregs *r = &sigsegv_regs;
-			char str[256];
-			if (crash_reason == NULL)
-				crash_reason = "SIGSEGV";
-			sprintf(str, "%s\n"
-				"   pc %08lx     lr %08lx    ctr %08lx    msr %08lx\n"
-				"  xer %08lx     cr %08lx  \n"
-				"   r0 %08lx     r1 %08lx     r2 %08lx     r3 %08lx\n"
-				"   r4 %08lx     r5 %08lx     r6 %08lx     r7 %08lx\n"
-				"   r8 %08lx     r9 %08lx    r10 %08lx    r11 %08lx\n"
-				"  r12 %08lx    r13 %08lx    r14 %08lx    r15 %08lx\n"
-				"  r16 %08lx    r17 %08lx    r18 %08lx    r19 %08lx\n"
-				"  r20 %08lx    r21 %08lx    r22 %08lx    r23 %08lx\n"
-				"  r24 %08lx    r25 %08lx    r26 %08lx    r27 %08lx\n"
-				"  r28 %08lx    r29 %08lx    r30 %08lx    r31 %08lx\n",
-				crash_reason,
-				r->nip, r->link, r->ctr, r->msr,
-				r->xer, r->ccr,
-				r->gpr[0], r->gpr[1], r->gpr[2], r->gpr[3],
-				r->gpr[4], r->gpr[5], r->gpr[6], r->gpr[7],
-				r->gpr[8], r->gpr[9], r->gpr[10], r->gpr[11],
-				r->gpr[12], r->gpr[13], r->gpr[14], r->gpr[15],
-				r->gpr[16], r->gpr[17], r->gpr[18], r->gpr[19],
-				r->gpr[20], r->gpr[21], r->gpr[22], r->gpr[23],
-				r->gpr[24], r->gpr[25], r->gpr[26], r->gpr[27],
-				r->gpr[28], r->gpr[29], r->gpr[30], r->gpr[31]);
-			printf(str);
-			VideoQuitFullScreen();
-
-#ifdef ENABLE_MON
-			// Start up mon in real-mode
-			printf("Welcome to the sheep factory.\n");
-			const char *arg[4] = {"mon", "-m", "-r", NULL};
-			mon(3, arg);
-#endif
-			return NULL;
-		}
-#endif
 
 		// Pseudo Mac 1Hz interrupt, update local time
 		if (++tick_counter > 60) {
@@ -1683,550 +1636,6 @@ void EnableInterrupt(void)
 #endif
 }
 
-
-/*
- *  USR2 handler
- */
-
-#if !EMULATED_PPC
-void sigusr2_handler(int sig, siginfo_t *sip, void *scp)
-{
-	machine_regs *r = MACHINE_REGISTERS(scp);
-
-#ifdef SYSTEM_CLOBBERS_R2
-	// Restore pointer to Thread Local Storage
-	set_r2(TOC);
-#endif
-#ifdef SYSTEM_CLOBBERS_R13
-	// Restore pointer to .sdata section
-	set_r13(R13);
-#endif
-
-#ifdef USE_SDL_VIDEO
-	// We must fill in the events queue in the same thread that did call SDL_SetVideoMode()
-	SDL_PumpEvents();
-#endif
-
-	// Do nothing if interrupts are disabled
-	if (*(int32 *)XLM_IRQ_NEST > 0)
-		return;
-
-	// Disable MacOS stack sniffer
-	WriteMacInt32(0x110, 0);
-
-	// Interrupt action depends on current run mode
-	switch (ReadMacInt32(XLM_RUN_MODE)) {
-		case MODE_68K:
-			// 68k emulator active, trigger 68k interrupt level 1
-			WriteMacInt16(ReadMacInt32(0x67c), 1);
-			r->cr() |= ReadMacInt32(0x674);
-			break;
-
-#if INTERRUPTS_IN_NATIVE_MODE
-		case MODE_NATIVE:
-			// 68k emulator inactive, in nanokernel?
-			if (r->gpr(1) != KernelDataAddr) {
-
-				// Set extra stack for SIGSEGV handler
-				sigaltstack(&extra_stack, NULL);
-				
-				// Prepare for 68k interrupt level 1
-				WriteMacInt16(ReadMacInt32(0x67c), 1);
-				WriteMacInt32(ReadMacInt32(0x658) + 0xdc, ReadMacInt32(ReadMacInt32(0x658) + 0xdc) | ReadMacInt32(0x674));
-
-				// Execute nanokernel interrupt routine (this will activate the 68k emulator)
-				DisableInterrupt();
-				if (ROMType == ROMTYPE_NEWWORLD)
-					ppc_interrupt(ROMBase + 0x312b1c, KernelDataAddr);
-				else
-					ppc_interrupt(ROMBase + 0x312a3c, KernelDataAddr);
-
-				// Reset normal stack
-				sigaltstack(&sig_stack, NULL);
-			}
-			break;
-#endif
-
-#if INTERRUPTS_IN_EMUL_OP_MODE
-		case MODE_EMUL_OP:
-			// 68k emulator active, within EMUL_OP routine, execute 68k interrupt routine directly when interrupt level is 0
-			if ((ReadMacInt32(XLM_68K_R25) & 7) == 0) {
-
-				// Set extra stack for SIGSEGV handler
-				sigaltstack(&extra_stack, NULL);
-#if 1
-				// Execute full 68k interrupt routine
-				M68kRegisters r;
-				uint32 old_r25 = ReadMacInt32(XLM_68K_R25);	// Save interrupt level
-				WriteMacInt32(XLM_68K_R25, 0x21);			// Execute with interrupt level 1
-				static const uint16 proc[] = {
-					0x3f3c, 0x0000,		// move.w	#$0000,-(sp)	(fake format word)
-					0x487a, 0x000a,		// pea		@1(pc)			(return address)
-					0x40e7,				// move		sr,-(sp)		(saved SR)
-					0x2078, 0x0064,		// move.l	$64,a0
-					0x4ed0,				// jmp		(a0)
-					M68K_RTS			// @1
-				};
-				Execute68k((uint32)proc, &r);
-				WriteMacInt32(XLM_68K_R25, old_r25);		// Restore interrupt level
-#else
-				// Only update cursor
-				if (HasMacStarted()) {
-					if (InterruptFlags & INTFLAG_VIA) {
-						ClearInterruptFlag(INTFLAG_VIA);
-						ADBInterrupt();
-						ExecuteNative(NATIVE_VIDEO_VBL);
-					}
-				}
-#endif
-				// Reset normal stack
-				sigaltstack(&sig_stack, NULL);
-			}
-			break;
-#endif
-	}
-}
-#endif
-
-
-/*
- *  SIGSEGV handler
- */
-
-#if !EMULATED_PPC
-static void sigsegv_handler(int sig, siginfo_t *sip, void *scp)
-{
-	machine_regs *r = MACHINE_REGISTERS(scp);
-
-	// Get effective address
-	uint32 addr = r->dar();
-	
-#ifdef SYSTEM_CLOBBERS_R2
-	// Restore pointer to Thread Local Storage
-	set_r2(TOC);
-#endif
-#ifdef SYSTEM_CLOBBERS_R13
-	// Restore pointer to .sdata section
-	set_r13(R13);
-#endif
-
-#if ENABLE_VOSF
-	// Handle screen fault
-#if SIGSEGV_CHECK_VERSION(1,0,0)
-	sigsegv_info_t si;
-	si.addr = (sigsegv_address_t)addr;
-	si.pc = (sigsegv_address_t)r->pc();
-#endif
-	extern bool Screen_fault_handler(sigsegv_info_t *sip);
-	if (Screen_fault_handler(&si))
-		return;
-#endif
-
-	// Fault in Mac ROM or RAM or DR Cache?
-	bool mac_fault = (r->pc() >= ROMBase) && (r->pc() < (ROMBase + ROM_AREA_SIZE)) || (r->pc() >= RAMBase) && (r->pc() < (RAMBase + RAMSize)) || (r->pc() >= DR_CACHE_BASE && r->pc() < (DR_CACHE_BASE + DR_CACHE_SIZE));
-	if (mac_fault) {
-
-		// "VM settings" during MacOS 8 installation
-		if (r->pc() == ROMBase + 0x488160 && r->gpr(20) == 0xf8000000) {
-			r->pc() += 4;
-			r->gpr(8) = 0;
-			return;
-	
-		// MacOS 8.5 installation
-		} else if (r->pc() == ROMBase + 0x488140 && r->gpr(16) == 0xf8000000) {
-			r->pc() += 4;
-			r->gpr(8) = 0;
-			return;
-	
-		// MacOS 8 serial drivers on startup
-		} else if (r->pc() == ROMBase + 0x48e080 && (r->gpr(8) == 0xf3012002 || r->gpr(8) == 0xf3012000)) {
-			r->pc() += 4;
-			r->gpr(8) = 0;
-			return;
-	
-		// MacOS 8.1 serial drivers on startup
-		} else if (r->pc() == ROMBase + 0x48c5e0 && (r->gpr(20) == 0xf3012002 || r->gpr(20) == 0xf3012000)) {
-			r->pc() += 4;
-			return;
-		} else if (r->pc() == ROMBase + 0x4a10a0 && (r->gpr(20) == 0xf3012002 || r->gpr(20) == 0xf3012000)) {
-			r->pc() += 4;
-			return;
-	
-		// MacOS 8.6 serial drivers on startup (with DR Cache and OldWorld ROM)
-		} else if ((r->pc() - DR_CACHE_BASE) < DR_CACHE_SIZE && (r->gpr(16) == 0xf3012002 || r->gpr(16) == 0xf3012000)) {
-			r->pc() += 4;
-			return;
-		} else if ((r->pc() - DR_CACHE_BASE) < DR_CACHE_SIZE && (r->gpr(20) == 0xf3012002 || r->gpr(20) == 0xf3012000)) {
-			r->pc() += 4;
-			return;
-		}
-
-		// Get opcode and divide into fields
-		uint32 opcode = *((uint32 *)r->pc());
-		uint32 primop = opcode >> 26;
-		uint32 exop = (opcode >> 1) & 0x3ff;
-		uint32 ra = (opcode >> 16) & 0x1f;
-		uint32 rb = (opcode >> 11) & 0x1f;
-		uint32 rd = (opcode >> 21) & 0x1f;
-		int32 imm = (int16)(opcode & 0xffff);
-
-		// Analyze opcode
-		enum {
-			TYPE_UNKNOWN,
-			TYPE_LOAD,
-			TYPE_STORE
-		} transfer_type = TYPE_UNKNOWN;
-		enum {
-			SIZE_UNKNOWN,
-			SIZE_BYTE,
-			SIZE_HALFWORD,
-			SIZE_WORD
-		} transfer_size = SIZE_UNKNOWN;
-		enum {
-			MODE_UNKNOWN,
-			MODE_NORM,
-			MODE_U,
-			MODE_X,
-			MODE_UX
-		} addr_mode = MODE_UNKNOWN;
-		switch (primop) {
-			case 31:
-				switch (exop) {
-					case 23:	// lwzx
-						transfer_type = TYPE_LOAD; transfer_size = SIZE_WORD; addr_mode = MODE_X; break;
-					case 55:	// lwzux
-						transfer_type = TYPE_LOAD; transfer_size = SIZE_WORD; addr_mode = MODE_UX; break;
-					case 87:	// lbzx
-						transfer_type = TYPE_LOAD; transfer_size = SIZE_BYTE; addr_mode = MODE_X; break;
-					case 119:	// lbzux
-						transfer_type = TYPE_LOAD; transfer_size = SIZE_BYTE; addr_mode = MODE_UX; break;
-					case 151:	// stwx
-						transfer_type = TYPE_STORE; transfer_size = SIZE_WORD; addr_mode = MODE_X; break;
-					case 183:	// stwux
-						transfer_type = TYPE_STORE; transfer_size = SIZE_WORD; addr_mode = MODE_UX; break;
-					case 215:	// stbx
-						transfer_type = TYPE_STORE; transfer_size = SIZE_BYTE; addr_mode = MODE_X; break;
-					case 247:	// stbux
-						transfer_type = TYPE_STORE; transfer_size = SIZE_BYTE; addr_mode = MODE_UX; break;
-					case 279:	// lhzx
-						transfer_type = TYPE_LOAD; transfer_size = SIZE_HALFWORD; addr_mode = MODE_X; break;
-					case 311:	// lhzux
-						transfer_type = TYPE_LOAD; transfer_size = SIZE_HALFWORD; addr_mode = MODE_UX; break;
-					case 343:	// lhax
-						transfer_type = TYPE_LOAD; transfer_size = SIZE_HALFWORD; addr_mode = MODE_X; break;
-					case 375:	// lhaux
-						transfer_type = TYPE_LOAD; transfer_size = SIZE_HALFWORD; addr_mode = MODE_UX; break;
-					case 407:	// sthx
-						transfer_type = TYPE_STORE; transfer_size = SIZE_HALFWORD; addr_mode = MODE_X; break;
-					case 439:	// sthux
-						transfer_type = TYPE_STORE; transfer_size = SIZE_HALFWORD; addr_mode = MODE_UX; break;
-				}
-				break;
-	
-			case 32:	// lwz
-				transfer_type = TYPE_LOAD; transfer_size = SIZE_WORD; addr_mode = MODE_NORM; break;
-			case 33:	// lwzu
-				transfer_type = TYPE_LOAD; transfer_size = SIZE_WORD; addr_mode = MODE_U; break;
-			case 34:	// lbz
-				transfer_type = TYPE_LOAD; transfer_size = SIZE_BYTE; addr_mode = MODE_NORM; break;
-			case 35:	// lbzu
-				transfer_type = TYPE_LOAD; transfer_size = SIZE_BYTE; addr_mode = MODE_U; break;
-			case 36:	// stw
-				transfer_type = TYPE_STORE; transfer_size = SIZE_WORD; addr_mode = MODE_NORM; break;
-			case 37:	// stwu
-				transfer_type = TYPE_STORE; transfer_size = SIZE_WORD; addr_mode = MODE_U; break;
-			case 38:	// stb
-				transfer_type = TYPE_STORE; transfer_size = SIZE_BYTE; addr_mode = MODE_NORM; break;
-			case 39:	// stbu
-				transfer_type = TYPE_STORE; transfer_size = SIZE_BYTE; addr_mode = MODE_U; break;
-			case 40:	// lhz
-				transfer_type = TYPE_LOAD; transfer_size = SIZE_HALFWORD; addr_mode = MODE_NORM; break;
-			case 41:	// lhzu
-				transfer_type = TYPE_LOAD; transfer_size = SIZE_HALFWORD; addr_mode = MODE_U; break;
-			case 42:	// lha
-				transfer_type = TYPE_LOAD; transfer_size = SIZE_HALFWORD; addr_mode = MODE_NORM; break;
-			case 43:	// lhau
-				transfer_type = TYPE_LOAD; transfer_size = SIZE_HALFWORD; addr_mode = MODE_U; break;
-			case 44:	// sth
-				transfer_type = TYPE_STORE; transfer_size = SIZE_HALFWORD; addr_mode = MODE_NORM; break;
-			case 45:	// sthu
-				transfer_type = TYPE_STORE; transfer_size = SIZE_HALFWORD; addr_mode = MODE_U; break;
-#if EMULATE_UNALIGNED_LOADSTORE_MULTIPLE
-			case 46:	// lmw
-				if ((addr % 4) != 0) {
-					uint32 ea = addr;
-					D(bug("WARNING: unaligned lmw to EA=%08x from IP=%08x\n", ea, r->pc()));
-					for (int i = rd; i <= 31; i++) {
-						r->gpr(i) = ReadMacInt32(ea);
-						ea += 4;
-					}
-					r->pc() += 4;
-					goto rti;
-				}
-				break;
-			case 47:	// stmw
-				if ((addr % 4) != 0) {
-					uint32 ea = addr;
-					D(bug("WARNING: unaligned stmw to EA=%08x from IP=%08x\n", ea, r->pc()));
-					for (int i = rd; i <= 31; i++) {
-						WriteMacInt32(ea, r->gpr(i));
-						ea += 4;
-					}
-					r->pc() += 4;
-					goto rti;
-				}
-				break;
-#endif
-		}
-	
-		// Ignore ROM writes (including to the zero page, which is read-only)
-		if (transfer_type == TYPE_STORE &&
-			((addr >= ROMBase && addr < ROMBase + ROM_SIZE) ||
-			 (addr >= SheepMem::ZeroPage() && addr < SheepMem::ZeroPage() + SheepMem::PageSize()))) {
-//			D(bug("WARNING: %s write access to ROM at %08lx, pc %08lx\n", transfer_size == SIZE_BYTE ? "Byte" : transfer_size == SIZE_HALFWORD ? "Halfword" : "Word", addr, r->pc()));
-			if (addr_mode == MODE_U || addr_mode == MODE_UX)
-				r->gpr(ra) = addr;
-			r->pc() += 4;
-			goto rti;
-		}
-
-		// Ignore illegal memory accesses?
-		if (PrefsFindBool("ignoresegv")) {
-			if (addr_mode == MODE_U || addr_mode == MODE_UX)
-				r->gpr(ra) = addr;
-			if (transfer_type == TYPE_LOAD)
-				r->gpr(rd) = 0;
-			r->pc() += 4;
-			goto rti;
-		}
-
-		// In GUI mode, show error alert
-		if (!PrefsFindBool("nogui")) {
-			char str[256];
-			if (transfer_type == TYPE_LOAD || transfer_type == TYPE_STORE)
-				sprintf(str, GetString(STR_MEM_ACCESS_ERR), transfer_size == SIZE_BYTE ? "byte" : transfer_size == SIZE_HALFWORD ? "halfword" : "word", transfer_type == TYPE_LOAD ? GetString(STR_MEM_ACCESS_READ) : GetString(STR_MEM_ACCESS_WRITE), addr, r->pc(), r->gpr(24), r->gpr(1));
-			else
-				sprintf(str, GetString(STR_UNKNOWN_SEGV_ERR), r->pc(), r->gpr(24), r->gpr(1), opcode);
-			ErrorAlert(str);
-			QuitEmulator();
-			return;
-		}
-	}
-
-	// For all other errors, jump into debugger (sort of...)
-	crash_reason = (sig == SIGBUS) ? "SIGBUS" : "SIGSEGV";
-	if (!ready_for_signals) {
-		printf("%s\n");
-		printf(" sigcontext %p, machine_regs %p\n", scp, r);
-		printf(
-			"   pc %08lx     lr %08lx    ctr %08lx    msr %08lx\n"
-			"  xer %08lx     cr %08lx  \n"
-			"   r0 %08lx     r1 %08lx     r2 %08lx     r3 %08lx\n"
-			"   r4 %08lx     r5 %08lx     r6 %08lx     r7 %08lx\n"
-			"   r8 %08lx     r9 %08lx    r10 %08lx    r11 %08lx\n"
-			"  r12 %08lx    r13 %08lx    r14 %08lx    r15 %08lx\n"
-			"  r16 %08lx    r17 %08lx    r18 %08lx    r19 %08lx\n"
-			"  r20 %08lx    r21 %08lx    r22 %08lx    r23 %08lx\n"
-			"  r24 %08lx    r25 %08lx    r26 %08lx    r27 %08lx\n"
-			"  r28 %08lx    r29 %08lx    r30 %08lx    r31 %08lx\n",
-			crash_reason,
-			r->pc(), r->lr(), r->ctr(), r->msr(),
-			r->xer(), r->cr(),
-			r->gpr(0), r->gpr(1), r->gpr(2), r->gpr(3),
-			r->gpr(4), r->gpr(5), r->gpr(6), r->gpr(7),
-			r->gpr(8), r->gpr(9), r->gpr(10), r->gpr(11),
-			r->gpr(12), r->gpr(13), r->gpr(14), r->gpr(15),
-			r->gpr(16), r->gpr(17), r->gpr(18), r->gpr(19),
-			r->gpr(20), r->gpr(21), r->gpr(22), r->gpr(23),
-			r->gpr(24), r->gpr(25), r->gpr(26), r->gpr(27),
-			r->gpr(28), r->gpr(29), r->gpr(30), r->gpr(31));
-		exit(1);
-		QuitEmulator();
-		return;
-	} else {
-		// We crashed. Save registers, tell tick thread and loop forever
-		build_sigregs(&sigsegv_regs, r);
-		emul_thread_fatal = true;
-		for (;;) ;
-	}
-rti:;
-}
-
-
-/*
- *  SIGILL handler
- */
-
-static void sigill_handler(int sig, siginfo_t *sip, void *scp)
-{
-	machine_regs *r = MACHINE_REGISTERS(scp);
-	char str[256];
-
-#ifdef SYSTEM_CLOBBERS_R2
-	// Restore pointer to Thread Local Storage
-	set_r2(TOC);
-#endif
-#ifdef SYSTEM_CLOBBERS_R13
-	// Restore pointer to .sdata section
-	set_r13(R13);
-#endif
-
-	// Fault in Mac ROM or RAM?
-	bool mac_fault = (r->pc() >= ROMBase) && (r->pc() < (ROMBase + ROM_AREA_SIZE)) || (r->pc() >= RAMBase) && (r->pc() < (RAMBase + RAMSize));
-	if (mac_fault) {
-
-		// Get opcode and divide into fields
-		uint32 opcode = *((uint32 *)r->pc());
-		uint32 primop = opcode >> 26;
-		uint32 exop = (opcode >> 1) & 0x3ff;
-		uint32 ra = (opcode >> 16) & 0x1f;
-		uint32 rb = (opcode >> 11) & 0x1f;
-		uint32 rd = (opcode >> 21) & 0x1f;
-		int32 imm = (int16)(opcode & 0xffff);
-
-		switch (primop) {
-			case 9:		// POWER instructions
-			case 22:
-power_inst:		sprintf(str, GetString(STR_POWER_INSTRUCTION_ERR), r->pc(), r->gpr(1), opcode);
-				ErrorAlert(str);
-				QuitEmulator();
-				return;
-
-			case 31:
-				switch (exop) {
-					case 83:	// mfmsr
-						r->gpr(rd) = 0xf072;
-						r->pc() += 4;
-						goto rti;
-
-					case 210:	// mtsr
-					case 242:	// mtsrin
-					case 306:	// tlbie
-						r->pc() += 4;
-						goto rti;
-
-					case 339: {	// mfspr
-						int spr = ra | (rb << 5);
-						switch (spr) {
-							case 0:		// MQ
-							case 22:	// DEC
-							case 952:	// MMCR0
-							case 953:	// PMC1
-							case 954:	// PMC2
-							case 955:	// SIA
-							case 956:	// MMCR1
-							case 957:	// PMC3
-							case 958:	// PMC4
-							case 959:	// SDA
-								r->pc() += 4;
-								goto rti;
-							case 25:	// SDR1
-								r->gpr(rd) = 0xdead001f;
-								r->pc() += 4;
-								goto rti;
-							case 287:	// PVR
-								r->gpr(rd) = PVR;
-								r->pc() += 4;
-								goto rti;
-						}
-						break;
-					}
-
-					case 467: {	// mtspr
-						int spr = ra | (rb << 5);
-						switch (spr) {
-							case 0:		// MQ
-							case 22:	// DEC
-							case 275:	// SPRG3
-							case 528:	// IBAT0U
-							case 529:	// IBAT0L
-							case 530:	// IBAT1U
-							case 531:	// IBAT1L
-							case 532:	// IBAT2U
-							case 533:	// IBAT2L
-							case 534:	// IBAT3U
-							case 535:	// IBAT3L
-							case 536:	// DBAT0U
-							case 537:	// DBAT0L
-							case 538:	// DBAT1U
-							case 539:	// DBAT1L
-							case 540:	// DBAT2U
-							case 541:	// DBAT2L
-							case 542:	// DBAT3U
-							case 543:	// DBAT3L
-							case 952:	// MMCR0
-							case 953:	// PMC1
-							case 954:	// PMC2
-							case 955:	// SIA
-							case 956:	// MMCR1
-							case 957:	// PMC3
-							case 958:	// PMC4
-							case 959:	// SDA
-								r->pc() += 4;
-								goto rti;
-						}
-						break;
-					}
-
-					case 29: case 107: case 152: case 153:	// POWER instructions
-					case 184: case 216: case 217: case 248:
-					case 264: case 277: case 331: case 360:
-					case 363: case 488: case 531: case 537:
-					case 541: case 664: case 665: case 696:
-					case 728: case 729: case 760: case 920:
-					case 921: case 952:
-						goto power_inst;
-				}
-		}
-
-		// In GUI mode, show error alert
-		if (!PrefsFindBool("nogui")) {
-			sprintf(str, GetString(STR_UNKNOWN_SEGV_ERR), r->pc(), r->gpr(24), r->gpr(1), opcode);
-			ErrorAlert(str);
-			QuitEmulator();
-			return;
-		}
-	}
-
-	// For all other errors, jump into debugger (sort of...)
-	crash_reason = "SIGILL";
-	if (!ready_for_signals) {
-		printf("%s\n");
-		printf(" sigcontext %p, machine_regs %p\n", scp, r);
-		printf(
-			"   pc %08lx     lr %08lx    ctr %08lx    msr %08lx\n"
-			"  xer %08lx     cr %08lx  \n"
-			"   r0 %08lx     r1 %08lx     r2 %08lx     r3 %08lx\n"
-			"   r4 %08lx     r5 %08lx     r6 %08lx     r7 %08lx\n"
-			"   r8 %08lx     r9 %08lx    r10 %08lx    r11 %08lx\n"
-			"  r12 %08lx    r13 %08lx    r14 %08lx    r15 %08lx\n"
-			"  r16 %08lx    r17 %08lx    r18 %08lx    r19 %08lx\n"
-			"  r20 %08lx    r21 %08lx    r22 %08lx    r23 %08lx\n"
-			"  r24 %08lx    r25 %08lx    r26 %08lx    r27 %08lx\n"
-			"  r28 %08lx    r29 %08lx    r30 %08lx    r31 %08lx\n",
-			crash_reason,
-			r->pc(), r->lr(), r->ctr(), r->msr(),
-			r->xer(), r->cr(),
-			r->gpr(0), r->gpr(1), r->gpr(2), r->gpr(3),
-			r->gpr(4), r->gpr(5), r->gpr(6), r->gpr(7),
-			r->gpr(8), r->gpr(9), r->gpr(10), r->gpr(11),
-			r->gpr(12), r->gpr(13), r->gpr(14), r->gpr(15),
-			r->gpr(16), r->gpr(17), r->gpr(18), r->gpr(19),
-			r->gpr(20), r->gpr(21), r->gpr(22), r->gpr(23),
-			r->gpr(24), r->gpr(25), r->gpr(26), r->gpr(27),
-			r->gpr(28), r->gpr(29), r->gpr(30), r->gpr(31));
-		exit(1);
-		QuitEmulator();
-		return;
-	} else {
-		// We crashed. Save registers, tell tick thread and loop forever
-		build_sigregs(&sigsegv_regs, r);
-		emul_thread_fatal = true;
-		for (;;) ;
-	}
-rti:;
-}
-#endif
 
 /*
  *  Helpers to share 32-bit addressable data with MacOS

@@ -114,14 +114,14 @@
 // Configure PowerPC emulator
 #define PPC_REENTRANT_JIT 1
 #define PPC_CHECK_INTERRUPTS 1
-#define PPC_DECODE_CACHE 1
-#define PPC_FLIGHT_RECORDER 1
+#define PPC_DECODE_CACHE 0
+#define PPC_FLIGHT_RECORDER 0
 #define PPC_PROFILE_COMPILE_TIME 0
 #define PPC_PROFILE_GENERIC_CALLS 0
 #define PPC_PROFILE_REGS_USE 0
 #define KPX_MAX_CPUS 1
 #if ENABLE_DYNGEN
-#define PPC_ENABLE_JIT 1
+#define PPC_ENABLE_JIT 0
 #endif
 #if defined(__i386__) || defined(__x86_64__)
 #define DYNGEN_ASM_OPTS 1
@@ -495,5 +495,11 @@ extern uint32 call_macos7(uint32 tvect, uint32 arg1, uint32 arg2, uint32 arg3, u
 #ifdef __cplusplus
 }
 #endif
+
+struct RegTmp {
+	uint32 gpr[32];
+	uint64 fpr[32];
+	uint32 pc, lr, ctr, cr, xer, fpscr;
+};
 
 #endif
