@@ -114,11 +114,6 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		08003F851E0624D100A3ADAB /* basic-dyngen-ops-x86_32.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; name = "basic-dyngen-ops-x86_32.hpp"; path = "dyngen_precompiled/basic-dyngen-ops-x86_32.hpp"; sourceTree = "<group>"; };
-		08003F871E0624D100A3ADAB /* basic-dyngen-ops.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; name = "basic-dyngen-ops.hpp"; path = "dyngen_precompiled/basic-dyngen-ops.hpp"; sourceTree = "<group>"; };
-		08003F881E0624D100A3ADAB /* ppc-dyngen-ops-x86_32.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; name = "ppc-dyngen-ops-x86_32.hpp"; path = "dyngen_precompiled/ppc-dyngen-ops-x86_32.hpp"; sourceTree = "<group>"; };
-		08003F8A1E0624D100A3ADAB /* ppc-dyngen-ops.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; name = "ppc-dyngen-ops.hpp"; path = "dyngen_precompiled/ppc-dyngen-ops.hpp"; sourceTree = "<group>"; };
-		08003F8B1E0624D100A3ADAB /* ppc-execute-impl.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = "ppc-execute-impl.cpp"; path = "dyngen_precompiled/ppc-execute-impl.cpp"; sourceTree = "<group>"; };
 		082AC22C14AA52E900071F5E /* prefs_editor_dummy.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = prefs_editor_dummy.cpp; sourceTree = "<group>"; };
 		083E370A16EFE85000CCCA59 /* disk_sparsebundle.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = disk_sparsebundle.cpp; path = ../Unix/disk_sparsebundle.cpp; sourceTree = SOURCE_ROOT; };
 		083E370B16EFE85000CCCA59 /* disk_unix.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = disk_unix.h; path = ../Unix/disk_unix.h; sourceTree = SOURCE_ROOT; };
@@ -307,8 +302,6 @@
 		E45D3F932A3FE95E00D1DF90 /* TinyPPC.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = TinyPPC.cpp; path = ../TinyPPC.cpp; sourceTree = "<group>"; };
 		E45D3F942A3FE95E00D1DF90 /* TinyPPC.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = TinyPPC.h; path = ../TinyPPC.h; sourceTree = "<group>"; };
 		E4989F3224DE4438004D43E2 /* config-macosx-aarch64.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "config-macosx-aarch64.h"; sourceTree = "<group>"; };
-		E4C9A03D1FD55CDC00CABBF9 /* basic-dyngen-ops-x86_64_macos.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; name = "basic-dyngen-ops-x86_64_macos.hpp"; path = "dyngen_precompiled/basic-dyngen-ops-x86_64_macos.hpp"; sourceTree = "<group>"; };
-		E4C9A03F1FD55CE700CABBF9 /* ppc-dyngen-ops-x86_64_macos.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; name = "ppc-dyngen-ops-x86_64_macos.hpp"; path = "dyngen_precompiled/ppc-dyngen-ops-x86_64_macos.hpp"; sourceTree = "<group>"; };
 		E4CBF46020CFC451009F40CC /* video_sdl.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = video_sdl.cpp; path = ../../../BasiliskII/src/SDL/video_sdl.cpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -329,20 +322,6 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		08003F841E0624BD00A3ADAB /* dyngen_precompiled */ = {
-			isa = PBXGroup;
-			children = (
-				08003F851E0624D100A3ADAB /* basic-dyngen-ops-x86_32.hpp */,
-				E4C9A03D1FD55CDC00CABBF9 /* basic-dyngen-ops-x86_64_macos.hpp */,
-				08003F871E0624D100A3ADAB /* basic-dyngen-ops.hpp */,
-				08003F881E0624D100A3ADAB /* ppc-dyngen-ops-x86_32.hpp */,
-				E4C9A03F1FD55CE700CABBF9 /* ppc-dyngen-ops-x86_64_macos.hpp */,
-				08003F8A1E0624D100A3ADAB /* ppc-dyngen-ops.hpp */,
-				08003F8B1E0624D100A3ADAB /* ppc-execute-impl.cpp */,
-			);
-			name = dyngen_precompiled;
-			sourceTree = "<group>";
-		};
 		082AC25614AA59DA00071F5E /* Darwin */ = {
 			isa = PBXGroup;
 			children = (
@@ -568,7 +547,6 @@
 		0856CEC314A99EF0000B1711 /* Unix */ = {
 			isa = PBXGroup;
 			children = (
-				08003F841E0624BD00A3ADAB /* dyngen_precompiled */,
 				082AC25614AA59DA00071F5E /* Darwin */,
 				0856CEC414A99EF0000B1711 /* about_window_unix.cpp */,
 				083E370A16EFE85000CCCA59 /* disk_sparsebundle.cpp */,

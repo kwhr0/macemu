@@ -428,7 +428,7 @@
 
 /* Define if the __PAGEZERO Mach-O Low Memory Globals hack works on this
    system. */
-#define PAGEZERO_HACK 1
+/* #define PAGEZERO_HACK 1 */
 
 /* Define as the return type of signal handlers (`int' or `void'). */
 #define RETSIGTYPE void
