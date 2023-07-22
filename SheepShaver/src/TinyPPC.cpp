@@ -399,9 +399,8 @@ template<int M> void TinyPPC::loadstore(u32 op) {
 		if constexpr ((M & 0xf) == 0xb) stD(op, FPR { .i = ld8(ea) });
 		if constexpr ((M & 0xf) == 0xc) string_x(string_load); // lswx
 		if constexpr ((M & 0xf) == 0xe) // lmw
-			if (!(ea & 3))
-				for (int r = op >> 21 & 0x1f; r <= 0x1f; r++, ea += 4)
-					gpr[r] = ld4(ea);
+			for (int r = op >> 21 & 0x1f; r <= 0x1f; r++, ea += 4)
+				gpr[r] = ld4(ea);
 		if constexpr ((M & 0xf) == 0xf) { // lwarx
 			stD(op, ld4(ea));
 			reserve_adr = ea;
@@ -420,9 +419,8 @@ template<int M> void TinyPPC::loadstore(u32 op) {
 		if constexpr ((M & 0xf) == 0xc) string_x(string_store); // stswx
 		if constexpr ((M & 0xf) == 0xd) st4(ea, (u32)frS(op).i); // stfiwx
 		if constexpr ((M & 0xf) == 0xe) // stmw
-			if (!(ea & 3))
-				for (int r = op >> 21 & 0x1f; r <= 0x1f; r++, ea += 4)
-					st4(ea, gpr[r]);
+			for (int r = op >> 21 & 0x1f; r <= 0x1f; r++, ea += 4)
+				st4(ea, gpr[r]);
 		if constexpr ((M & 0xf) == 0xf) { // stwcx.
 			cr = (cr & ~MSD) | (xer & MSB) >> 3;
 			if (reserve && reserve_adr == ea) {
