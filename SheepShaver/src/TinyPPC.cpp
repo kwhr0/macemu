@@ -251,7 +251,7 @@ static struct Insn {
 	static inline pf_t fn[0x20000];
 } insn;
 
-static struct DigitMask {
+static constexpr struct DigitMask {
 	constexpr DigitMask() : m() {
 		for (int i = 0; i < 256; i++) {
 			uint32_t t = 0;

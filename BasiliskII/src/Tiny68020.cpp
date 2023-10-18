@@ -446,7 +446,10 @@ void Tiny68020::movec(u16 op) {
 			cr[x] = (t & 0x8000 ? a : d)[t >> 12 & 7];
 			if (x == 2) cr[2] &= 0x80008000;
 		}
-		else (t & 0x8000 ? a : d)[t >> 12 & 7] = cr[x];
+		else {
+			cr[sr & MM ? 11 : 12] = a[7];
+			(t & 0x8000 ? a : d)[t >> 12 & 7] = cr[x];
+		}
 	}
 }
 
