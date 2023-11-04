@@ -737,6 +737,7 @@ void Tiny68020::Trap(u32 vector, u32 param) {
 		fprintf(stderr, "undefined trap: %d\n", vector);
 		exit(1);
 	}
+	trace_flag = 0;
 }
 
 void Tiny68020::Execute() {
