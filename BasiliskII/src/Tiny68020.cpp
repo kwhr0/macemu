@@ -500,25 +500,12 @@ template<int M> void Tiny68020::mul_l(u16 op) {
 		});
 }
 
-template<int M> void Tiny68020::divs_w(u16 op) { // divs.w
-	ea<1, M, 1>(op, [&](s16 v) {
-		s32 r = d[R9];
+template<int M, typename T16, typename T32> void Tiny68020::div_w(u16 op) {
+	ea<1, M, 1>(op, [&](T16 v) {
+		T32 r = d[R9];
 		if (v) {
-			s32 q = r / v;
-			if (q == (s16)q) r = flogic(r % v << 16 | (q & 0xffff), 1);
-			else fset0(VS);
-		}
-		else { fset0(C0); Trap(5); }
-		stD<2>(R9, r);
-	});
-}
-
-template<int M> void Tiny68020::divu_w(u16 op) { // divu.w
-	ea<1, M, 1>(op, [&](u16 v) {
-		u32 r = d[R9];
-		if (v) {
-			u32 q = r / v;
-			if (q == (u16)q) r = flogic(r % v << 16 | (q & 0xffff), 1);
+			T32 q = r / v;
+			if (q == (T16)q) r = flogic(r % v << 16 | (q & 0xffff), 1);
 			else fset0(VS);
 		}
 		else { fset0(C0); Trap(5); }
@@ -589,7 +576,7 @@ template<int M> void Tiny68020::bitfield(u16 op) { // M68000PRM.pdf page 1-29
 				;
 			d[t >> 12 & 7] = ofs + i;
 			return;
-		case 0x600: ext(); data |= mask(); break; //bfset
+		case 0x600: ext(); data |= mask(); break; // bfset
 		case 0x700: data = (data & ~mask()) | ((u64)fbf(d[t >> 12 & 7], width) << bofs & mask()); break; // bfins
 	}
 	if constexpr (M != 0) {

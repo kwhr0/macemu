@@ -339,8 +339,9 @@ private:
 		ea<1, M, 1>(op, [&](u16 v) { stD<2>(R9, fmul(v, (u16)d[R9], (u16)d[R9] * v, 0)); });
 	}
 	template<int M> void mul_l(u16 op);
-	template<int M> void divs_w(u16 op);
-	template<int M> void divu_w(u16 op);
+	template<int M, typename T16, typename T32> void div_w(u16 op);
+	template<int M> void divs_w(u16 op) { div_w<M, s16, s32>(op); }
+	template<int M> void divu_w(u16 op) { div_w<M, u16, u32>(op); }
 	template<int M> void div_l(u16 op);
 	template<int M, int S> void and_ea_d(u16 op) { // and <ea>,Dn
 		ea<1, M, S>(op, [&](u32 v) { stD<S>(R9, flogic(d[R9] & v, S)); });
