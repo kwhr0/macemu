@@ -997,6 +997,7 @@ void Tiny68020::importRegs(M68kRegisters &r) {
 	memcpy(a, r.a, sizeof(a));
 	SetSR(r.sr);
 }
+
 void Tiny68020::exportRegs(M68kRegisters &r) {
 	memcpy(r.d, d, sizeof(d));
 	memcpy(r.a, a, sizeof(a));
