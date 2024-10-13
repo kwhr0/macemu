@@ -1,5 +1,5 @@
 // TinyPPC
-// Copyright 2023 © Yasuo Kuwahara
+// Copyright 2023-2024 © Yasuo Kuwahara
 // MIT License
 
 #include <cstdint>

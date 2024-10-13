@@ -1,5 +1,5 @@
 // TinyPPC
-// Copyright 2023 © Yasuo Kuwahara
+// Copyright 2023-2024 © Yasuo Kuwahara
 // MIT License
 
 #include "TinyPPC.h"
@@ -8,7 +8,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#if TINYPPC_TRACE
 #include <string>
+#endif
 
 #define P(x)			(cnv.pmf = &TinyPPC::x, cnv.p)
 #define PI(x, i)		(cnv.pmf = &TinyPPC::x<i>, cnv.p)
@@ -240,14 +242,14 @@ static struct Insn {
 		a(6, 0, 0, 0, P(sheep)); // SheepShaver
 	}
 	void a(int opcd, int sop, int lsb, int mask, pf_t f) {
-		int start = opcd << 11 & 0x1f800;
-		int op = start | (sop << 1 & 0x7fe) | (lsb & 1);
-		int lim = start + 0x800;
-		mask |= 0x1f800;
-		for (int i = start; i < lim; i++)
+		int start = opcd & 0x3f;
+		int op = start | ((sop << 1 & 0x7fe) | (lsb & 1)) << 6;
+		int lim = start + 0x20000;
+		mask = mask << 6 | 0x3f;
+		for (int i = start; i < lim; i += 0x40)
 			if ((i & mask) == op) fn[i] = f;
 	}
-	static void exec1(TinyPPC *p, uint32_t op) { fn[op >> 26 << 11 | (op & 0x7ff)](p, op); }
+	static void exec1(TinyPPC *p, uint32_t op) { fn[(op >> 26 | op << 6) & 0x1ffff](p, op); }
 	static inline pf_t fn[0x20000];
 } insn;
 
@@ -592,7 +594,7 @@ void TinyPPC::StopTrace() {
 	do {
 		if (++tracep >= tracebuf + TRACEMAX) tracep = tracebuf;
 		fprintf(fo, "%4d %08x ", i++, tracep->pc);
-		fprintf(fo, "%08x %08x ", vm_read_memory_4_nolog(tracep->pc), tracep->cr);
+		fprintf(fo, "%08x %08x ", __builtin_bswap32((u32 &)m[tracep->pc]), tracep->cr);
 		for (Acs *p = tracep->acs; p < tracep->acs + tracep->index; p++) {
 			switch (p->type) {
 				case acsLoad8:
