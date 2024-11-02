@@ -1,5 +1,5 @@
 // Tiny68020
-// Copyright 2021-2023 © Yasuo Kuwahara
+// Copyright 2021-2024 © Yasuo Kuwahara
 // MIT License
 
 #include "Tiny68020.h"
@@ -59,6 +59,11 @@ a(op | 0x27, mask | 0x3f, PIS(x, 14, s));\
 a(op | 0x00, mask, PI(x, 0));\
 a(op | 0x40, mask, PI(x, 1));\
 a(op | 0x80, mask, PI(x, 2));\
+}
+#define S03(op, mask, x) {\
+a(op | 0x00, mask, PIS(x, 0, 0));\
+a(op | 0x40, mask, PIS(x, 0, 1));\
+a(op | 0x80, mask, PIS(x, 0, 2));\
 }
 #define IS3(op, mask, x) {\
 MODES(op | 0x00, mask, x, 0);\
@@ -277,10 +282,22 @@ static struct Insn {
 		MODE(0xd1c0, 0xf1c0, adda_l);
 		S3(0xd100, 0xf1f8, addx_r); // overwrite add_d_ea
 		S3(0xd108, 0xf1f8, addx_m); // overwrite add_d_ea
-		a(0xe000, 0xf0c0, PIS(sftrot, 0, 0));
-		a(0xe040, 0xf0c0, PIS(sftrot, 0, 1));
-		a(0xe080, 0xf0c0, PIS(sftrot, 0, 2));
-		MODES(0xe0c0, 0xf0c0, sftrot, 3);
+		S03(0xe000, 0xf1d8, asr);
+		S03(0xe008, 0xf1d8, lsr);
+		S03(0xe010, 0xf1d8, roxr);
+		S03(0xe018, 0xf1d8, ror);
+		S03(0xe100, 0xf1d8, asl);
+		S03(0xe108, 0xf1d8, lsl);
+		S03(0xe110, 0xf1d8, roxl);
+		S03(0xe118, 0xf1d8, rol);
+		MODES(0xe0c0, 0xf7c0, asr, 3);
+		MODES(0xe2c0, 0xf7c0, lsr, 3);
+		MODES(0xe4c0, 0xf7c0, roxr, 3);
+		MODES(0xe6c0, 0xf7c0, ror, 3);
+		MODES(0xe1c0, 0xf7c0, asl, 3);
+		MODES(0xe3c0, 0xf7c0, lsl, 3);
+		MODES(0xe5c0, 0xf7c0, roxl, 3);
+		MODES(0xe7c0, 0xf7c0, rol, 3);
 		MODE(0xe8c0, 0xf8c0, bitfield);
 		a(0xf000, 0xf000, P(f_line));
 		a(0xf280, 0xffff, P(xf280)); // for booting KT7.5.3
@@ -294,12 +311,7 @@ static struct Insn {
 	static inline pf_t fn[0x10000];
 } insn;
 
-static void error() {
-	fprintf(stderr, "internal error\n");
-	exit(1);
-}
-
-Tiny68020::Tiny68020() : m(nullptr), intrVecFunc(nullptr) {
+Tiny68020::Tiny68020() : m(nullptr) {
 #if TINY68020_TRACE
 	memset(tracebuf, 0, sizeof(tracebuf));
 	tracep = tracebuf;
@@ -310,11 +322,8 @@ void Tiny68020::Reset() {
 	memset(d, 0, sizeof(d));
 	memset(a, 0, sizeof(a));
 	memset(cr, 0, sizeof(cr));
-	intreq = 0;
-	SetupFlags(0);
 	sr = MS | MI;
 	trace_pc = 0;
-	trace_flag = 0;
 	// BasiliskII
 	a[7] = 0x2000;
 	pc = ROMBaseMac + 0x2a;
@@ -330,8 +339,8 @@ template<int RW, int M, int S, typename F> Tiny68020::u32 Tiny68020::ea(int reg,
 		u32 t;
 		if constexpr (MPU_TYPE >= 68020) {
 			auto idx = [&]{
-				u32 t = (ext & 0x8000 ? a : d)[ext >> 12 & 7];
-				return (ext & 0x800 ? t : (s16)t) << (ext >> 9 & 3);
+				u32 o = (ext & 0x8000 ? a : d)[ext >> 12 & 7];
+				return (ext & 0x800 ? o : (s16)o) << (ext >> 9 & 3);
 			};
 			auto disp = [&](int sw)->u32 {
 				switch (sw & 3) {
@@ -349,12 +358,12 @@ template<int RW, int M, int S, typename F> Tiny68020::u32 Tiny68020::ea(int reg,
 					t = (ext & 7 ? ext & 4 ? get4(t) + idx() : get4(t + idx()) : t + idx()) + disp(ext);
 				}
 			}
-			else t = base + idx() + s8(ext & 0xff); // brief extension
+			else t = base + idx() + (s8)ext; // brief extension
 		}
 		else {
 			t = (ext & 0x8000 ? a : d)[ext >> 12 & 7];
 			t = ext & 0x800 ? t : (s16)t;
-			t += base + s8(ext & 0xff);
+			t += base + (s8)ext;
 		}
 		return t;
 	};
@@ -481,62 +490,39 @@ void Tiny68020::movep(u16 op) {
 	}
 }
 
-template<int M> void Tiny68020::mul_l(u16 op) {
-	u32 t = fetch2(), f64 = t & 0x400;
-	u32 &dq = d[t >> 12 & 7], &dr = d[t & 7];
-	if (t & 0x800) // muls.l
-		ea<1, M, 2>(op, [&](s32 v) {
-			s64 ts = (s32)dq * (s64)v;
-			fmul(dq, v, f64 ? ts >> 32 : (s32)ts, f64 ? 0 : 1);
-			dq = (s32)ts;
-			if (f64) dr = ts >> 32;
-		});
-	else // mulu.l
-		ea<1, M, 2>(op, [&](u32 v) {
-			u64 tu = dq * (u64)v;
-			fmul(dq, v, f64 ? tu >> 32 : (u32)tu, f64 ? 0 : 2);
-			dq = (u32)tu;
-			if (f64) dr = tu >> 32;
-		});
+template<int M, typename T32, typename T64> void Tiny68020::mul_l(u16 op, u16 op2) {
+	ea<1, M, 2>(op, [&](T32 v) {
+		T64 t = (T32)d[op2 >> 12 & 7] * (T64)v;
+		if (op2 & 0x400) fmul<3>(t);
+		else fmul<2, T32>(t);
+		stD<2>(op2 >> 12 & 7, t);
+		if (op2 & 0x400) stD<2>(op2 & 7, t >> 32);
+	});
 }
 
 template<int M, typename T16, typename T32> void Tiny68020::div_w(u16 op) {
 	ea<1, M, 1>(op, [&](T16 v) {
-		T32 r = d[R9];
 		if (v) {
-			T32 q = r / v;
-			if (q == (T16)q) r = flogic(r % v << 16 | (q & 0xffff), 1);
-			else fset0(VS);
+			T32 r = d[R9], q = r / v;
+			if (q == (T16)q) stD<2>(R9, flogic<1>(r % v << 16 | (q & 0xffff)));
+			else fset<V1>();
 		}
-		else { fset0(C0); Trap(5); }
-		stD<2>(R9, r);
+		else { fset<C0>(); Trap(5); }
 	});
 }
 
-template<int M> void Tiny68020::div_l(u16 op) {
-	u32 t = fetch2(), f64 = t & 0x400;
-	if (t & 0x800) // divs.l
-		ea<1, M, 2>(op, [&](s32 s) {
-			if (s) {
-				s64 q = f64 ? d[t >> 12 & 7] | (s64)d[t & 7] << 32 : (s32)d[t >> 12 & 7];
-				stD<2>(t & 7, q % s);
-				q /= s;
-				if (q == (s32)q) stD<2>(t >> 12 & 7, flogic((s32)q, 2));
-				else fset0(VS);
+template<int M, typename T32, typename T64> void Tiny68020::div_l(u16 op, u16 op2) {
+	ea<1, M, 2>(op, [&](T32 v) {
+		if (v) {
+			T64 r = op2 & 0x400 ? d[op2 >> 12 & 7] | (T64)d[op2 & 7] << 32 : (T32)d[op2 >> 12 & 7], q = r / v;
+			if (q == (T32)q) {
+				stD<2>(op2 & 7, r % v);
+				stD<2>(op2 >> 12 & 7, flogic<2>((T32)q));
 			}
-			else { fset0(C0); Trap(5); }
-		});
-	else // divu.l
-		ea<1, M, 2>(op, [&](u32 s) {
-			if (s) {
-				u64 q = d[t >> 12 & 7] | (f64 ? (u64)d[t & 7] << 32 : 0);
-				stD<2>(t & 7, q % s);
-				q /= s;
-				if (q == (u32)q) stD<2>(t >> 12 & 7, flogic((u32)q, 2));
-				else fset0(VS);
-			}
-			else { fset0(C0); Trap(5); }
-		});
+			else fset<V1>();
+		}
+		else { fset<C0>(); Trap(5); }
+	});
 }
 
 template<int W, int M, typename F> void Tiny68020::bitop(u16 op, F func) {
@@ -545,8 +531,8 @@ template<int W, int M, typename F> void Tiny68020::bitop(u16 op, F func) {
 	else m = fetch2();
 	if constexpr (!M) m = 1 << (m & 0x1f);
 	else m = 1 << (m & 7);
-	if constexpr (W & 1) { ea<3, M, M ? 0 : 2>(op, [&](u32 v) { fbtst(v & m, M ? 0 : 2); return func(v, m); }); }
-	else ea<1, M, M ? 0 : 2>(op, [&](u32 v) { fbtst(v & m, M ? 0 : 2); });
+	if constexpr (W & 1) { ea<3, M, M ? 0 : 2>(op, [&](u32 v) { fbtst<M ? 0 : 2>(v & m); return func(v, m); }); }
+	else ea<1, M, M ? 0 : 2>(op, [&](u32 v) { fbtst<M ? 0 : 2>(v & m); });
 }
 
 template<int M> void Tiny68020::bitfield(u16 op) { // M68000PRM.pdf page 1-29
@@ -586,57 +572,28 @@ template<int M> void Tiny68020::bitfield(u16 op) { // M68000PRM.pdf page 1-29
 	else d[R0] = data >> 32;
 }
 
-template <int M, int S> void Tiny68020::sftrot(u16 op) {
-	static constexpr u32 dm[] = {
-		XSR | NS | ZS | V0 | CSR, XSR | NS | ZS | V0 | CSR, XSR | NS | ZS | V0 | CXR, NS | ZS | V0 | CSR,
-		XSL | NS | ZS | VSL | CSL, XSL | NS | ZS | V0 | CSL, XSL | NS | ZS | V0 | CXL, NS | ZS | V0 | CSL
-	};
-	int sop = (op >> 6 & 4) | (op >> (S < 3 ? 3 : 9) & 3), bits = S < 3 ? 8 << S : 16;
-	auto f = [&](auto opfunc) {
-		if constexpr (S < 3) { // register
-			if (u32 v = d[R0], s = op & 0x20 ? d[R9] & 0x3f : ((op >> 9) - 1 & 7) + 1; s) {
-				if constexpr (S == 0) v = sop & 3 ? (u8)v : (s8)v;
-				if constexpr (S == 1) v = sop & 3 ? (u16)v : (s16)v;
-				s = sop & 2 ? (sop & 3) == 2 ? s % ((8 << S) + 1) : s & (8 << S) - 1 : s > bits ? bits : s;
-				stD<S>(R0, fset(dm[sop], s, v, (u32)opfunc(v, s), S));
-			}
-			else fset2(NS | ZS | V0 | C0, v, S);
+template <int M, int S, int DM, typename F> void Tiny68020::sftrot(u16 op, F func) {
+	if constexpr (S < 3) { // register
+		if (u32 v = d[R0], s = op & 0x20 ? d[R9] & 0x3f : ((op >> 9) - 1 & 7) + 1; s) {
+			int sop = op >> (S < 3 ? 3 : 9) & 3;
+			if constexpr (S == 0) v = sop ? (u8)v : (s8)v;
+			if constexpr (S == 1) v = sop ? (u16)v : (s16)v;
+			s = sop & 2 ? sop == 2 ? s % ((8 << S) + 1) : s & (8 << S) - 1 : s > bits(S) ? bits(S) : s;
+			stD<S>(R0, fset<DM, S>((u32)func(v, s), s, v));
 		}
-		else ea<3, M, 1>(op, [&](u32 v) { return fset(dm[sop], 1, v, (u32)opfunc(v, 1), 1); }); // memory
-	};
-	switch (sop) {
-		case 0: // asr
-			f([&](u64 v, u32 s) { return v >> s | (v >> (bits - 1) & 1 ? -1 << (bits - s) : 0); });
-			break;
-		case 1: // lsr
-			f([&](u64 v, u32 s) { return v >> s; });
-			break;
-		case 2: // roxr
-			f([&](u64 v, u32 s) { u32 t = bits + 1 - s; return v >> s | (t < 32 ? v << t : 0) | X() << (bits - s); });
-			break;
-		case 3: // ror
-			f([&](u64 v, u32 s) { return v >> s | v << (bits - s); });
-			break;
-		default: // asl/lsl
-			f([&](u64 v, u32 s) { return v << s; });
-			break;
-		case 6: // roxl
-			f([&](u64 v, u32 s) { u32 t = bits + 1 - s; return v << s | (t < 32 ? v >> t : 0) | X() << (s - 1); });
-			break;
-		case 7: // rol
-			f([&](u64 v, u32 s) { return v << s | v >> (bits - s); });
-			break;
+		else fset<NS | ZS | V0 | C0, S>(v);
 	}
+	else ea<3, M, 1>(op, [&](u32 v) { return fset<DM, 1>((u32)func(v, 1), 1, v); }); // memory
 }
 
 template<int W, int M> void Tiny68020::bcd(u16 op) {
 	auto add = [&](u8 x, u8 y) {
 		s16 l = (y & 0xf) + (x & 0xf) + X(), cl = l >= 0xa, u = (y & 0xf0) + (x & 0xf0) + (cl << 4), cu = u >= 0xa0;
-		return fbcd(cu, u - (cu ? 0xa0 : 0) + l - (cl ? 0xa : 0));
+		return fbcd(u - (cu ? 0xa0 : 0) + l - (cl ? 0xa : 0), cu);
 	};
 	auto sub = [&](u8 x, u8 y) {
 		s16 l = (y & 0xf) - (x & 0xf) - X(), cl = l < 0, u = (y & 0xf0) - (x & 0xf0) - (cl << 4), cu = u < 0;
-		return fbcd(cu, u + (cu ? 0xa0 : 0) + l + (cl ? 0xa : 0));
+		return fbcd(u + (cu ? 0xa0 : 0) + l + (cl ? 0xa : 0), cu);
 	};
 	if constexpr (W == 2) ea<3, M, 0>(op, [&](u8 v) { return sub(v, 0); }); // nbcd
 	else { // abcd / sbcd
@@ -655,7 +612,7 @@ template <int C, int S> void Tiny68020::bcc(u16 op) {
 		u32 t = pc;
 		if constexpr (S == 2) t += fetch2();
 		else if constexpr (S == 4) t += fetch4();
-		else t += s8(op & 0xff);
+		else t += (s8)op;
 		pc = t;
 	}
 	else pc += S;
@@ -665,7 +622,7 @@ template <int S> void Tiny68020::bsr(u16 op) {
 	u32 t = pc;
 	if constexpr (S == 2) t += fetch2();
 	else if constexpr (S == 4) t += fetch4();
-	else t += s8(op & 0xff);
+	else t += (s8)op;
 	push4(pc);
 	pc = t;
 }
@@ -690,7 +647,7 @@ void Tiny68020::rte(u16) {
 template <int M, int S> void Tiny68020::cas(u16 op) {
 	u16 t = fetch2();
 	ea<1, M, S>(op, [&](u32 v) {
-		if (fcmp(d[t & 7], v, v - d[t & 7], S)) stD<S>(t & 7, v);
+		if (fcmp<S>(v - d[t & 7], d[t & 7], v)) stD<S>(t & 7, v);
 		else ea<2, M, S>(op, [&]{ return d[t >> 6 & 7]; });
 	});
 }
@@ -699,8 +656,8 @@ void Tiny68020::SetSR(u16 data, bool perm) {
 	if (!perm && !(sr & MS) && data & MS) Trap(8);
 	cr[sr & MS ? sr & MM ? CR_MSP : CR_ISP : CR_USP] = a[7];
 	a[7] = cr[data & MS ? data & MM ? CR_MSP : CR_ISP : CR_USP];
-	SetupFlags(sr = data);
-	if (data & MT) { trace_pc = pc; trace_flag = 2; }
+	sr = data & 0xff1f;
+	if (data & MT) { trace_pc = pc; SPCFLAGS_SET(SPCFLAG_TRACE); } // BasiliskII
 }
 
 void Tiny68020::Trap(u32 vector, u32 param) {
@@ -708,7 +665,7 @@ void Tiny68020::Trap(u32 vector, u32 param) {
 		fprintf(stderr, "ignored trap vector: %d\n", vector);
 		return;
 	}
-	u16 sr0 = (sr & 0xff00) | ResolvFlags();
+	u16 sr0 = sr;
 	SetSR((sr0 & ~MT) | MS, true);
 	if constexpr (MPU_TYPE >= 68020) {
 		if (vector >= 5 && vector <= 9) {
@@ -724,7 +681,6 @@ void Tiny68020::Trap(u32 vector, u32 param) {
 		fprintf(stderr, "undefined trap: %d\n", vector);
 		exit(1);
 	}
-	trace_flag = 0;
 }
 
 void Tiny68020::Execute() {
@@ -734,199 +690,154 @@ void Tiny68020::Execute() {
 		tracep->index = 0;
 #endif
 		Insn::exec1(this, fetch2());
-		if (trace_flag && !--trace_flag) Trap(9, trace_pc);
-		if (intreq > (sr >> LI & 7) || intreq == 7) {
-			int i = intreq;
-			intreq = 0; // an interrupt may occur in intrVecFunc()
-			Trap(intrVecFunc ? intrVecFunc(i) : 24 + i);
-			sr = (sr & ~MI) | i << LI;
-		}
 #if TINY68020_TRACE
-		tracep->ccr = ResolvFlags();
+		tracep->ccr = sr;
 #if TINY68020_TRACE > 1
 		if (++tracep >= tracebuf + TRACEMAX - 1) StopTrace();
 #else
 		if (++tracep >= tracebuf + TRACEMAX) tracep = tracebuf;
 #endif
 #endif
-	} while (!SPCFLAGS_TEST(SPCFLAG_ALL) || !m68k_do_specialties()); // BasiliskII
+#ifdef CURMPU
+		break;
+#endif
+	} while (!spcflags || !m68k_do_specialties()); // BasiliskII
 }
 
 template<int C> int Tiny68020::cond() {
-	if constexpr (C == 1) return false;
-	if constexpr (C == 2) return !ResolvC() && !ResolvZ();
-	if constexpr (C == 3) return ResolvC() || ResolvZ();
-	if constexpr (C == 4) return !ResolvC();
-	if constexpr (C == 5) return ResolvC();
-	if constexpr (C == 6) return !ResolvZ();
-	if constexpr (C == 7) return ResolvZ();
-	if constexpr (C == 8) return !ResolvV();
-	if constexpr (C == 9) return ResolvV();
-	if constexpr (C == 10) return !ResolvN();
-	if constexpr (C == 11) return ResolvN();
-	if constexpr (C == 12) return ~(ResolvN() >> LN ^ ResolvV() >> LV) & 1;
-	if constexpr (C == 13) return (ResolvN() >> LN ^ ResolvV() >> LV) & 1;
-	if constexpr (C == 14) return ~(ResolvZ() >> LZ | (ResolvN() >> LN ^ ResolvV() >> LV)) & 1;
-	if constexpr (C == 15) return (ResolvZ() >> LZ | (ResolvN() >> LN ^ ResolvV() >> LV)) & 1;
-	return true;
+	if constexpr (C == 1) return 0;
+	if constexpr (C == 2) return !(sr & (MC | MZ));
+	if constexpr (C == 3) return sr & (MC | MZ);
+	if constexpr (C == 4) return !(sr & MC);
+	if constexpr (C == 5) return sr & MC;
+	if constexpr (C == 6) return !(sr & MZ);
+	if constexpr (C == 7) return sr & MZ;
+	if constexpr (C == 8) return !(sr & MV);
+	if constexpr (C == 9) return sr & MV;
+	if constexpr (C == 10) return !(sr & MN);
+	if constexpr (C == 11) return sr & MN;
+	if constexpr (C == 12) return ~(sr ^ sr << (LN - LV)) & MN;
+	if constexpr (C == 13) return (sr ^ sr << (LN - LV)) & MN;
+	if constexpr (C == 14) return ~(sr << (LN - LZ) | (sr ^ sr << (LN - LV))) & MN;
+	if constexpr (C == 15) return (sr << (LN - LZ) | (sr ^ sr << (LN - LV))) & MN;
+	return 1;
 };
 
-#define MSB_N	((8 << p->size) - 1)
-#define IS0		!(p->r & u32((1LL << (8 << p->size)) - 1))
+// M68000PRM.pdf page 3-18
 
-int Tiny68020::ResolvC() {
-	u32 sw = 0;
-	FlagDecision *p;
-	for (p = fp - 1; p >= fbuf && !(sw = p->dm & 0xf); p--)
-		;
-	if (p < fbuf) error();
-	switch (sw) {
-		case F0:
-			break;
-		case FB:
-			return p->r & MC;
-		case FADD:
-			return (((p->s & p->d) | (~p->r & p->d) | (p->s & ~p->r)) >> MSB_N & 1) << LC;
-		case FSUB:
-			return (((p->s & ~p->d) | (p->r & ~p->d) | (p->s & p->r)) >> MSB_N & 1) << LC;
-		case FXL:
-			if (!p->s) return ResolvX() >> LX << LC;
-			//no break
-		case FSL:
-			return p->s ? (p->d >> ((8 << p->size) - p->s) & 1) << LC : 0;
-		case FXR:
-			if (!p->s) return ResolvX() >> LX << LC;
-			//no break
-		case FSR:
-			return p->s ? (p->d >> (p->s - 1) & 1) << LC : 0;
-		case FBCD:
-			return (p->s != 0) << LC;
-		default:
-			error();
-			break;
+#define MSB_N	((8 << S) - 1)
+
+template<int DM, int S> Tiny68020::u32 Tiny68020::fset(u32 r, u32 s, u32 d) {
+	if constexpr ((DM & 0xf) == C0)
+		sr &= ~MC;
+	if constexpr ((DM & 0xf) == CSUB) {
+		if (((s & ~d) | (r & ~d) | (s & r)) >> MSB_N & 1) sr |= MC;
+		else sr &= ~MC;
 	}
-	return 0;
-}
-
-int Tiny68020::ResolvV() {
-	u32 sw = 0;
-	FlagDecision *p;
-	for (p = fp - 1; p >= fbuf && !(sw = p->dm & 0xf0); p--)
-		;
-	if (p < fbuf) error();
-	switch (sw >> 4) {
-		case F0:
-			break;
-		case FB:
-			return p->r & MV;
-		case FS:
-			return MV; // for div
-		case FADD:
-			return (((p->s & p->d & ~p->r) | (~p->s & ~p->d & p->r)) >> MSB_N & 1) << LV;
-		case FSUB:
-			return (((~p->s & p->d & ~p->r) | (p->s & ~p->d & p->r)) >> MSB_N & 1) << LV;
-		case FMUL:
-			if (p->size/*type*/ == 1) { s64 ts = (s64)(s32)p->s * (s32)p->d; return ts != (s32)ts; }
-			else if (p->size/*type*/ == 2) { u64 tu = (u64)p->s * p->d; return tu != (u32)tu; }
-			return 0;
-		case FSL:
-		{ // ex) count=4,bits=8  V=0 if Mmmmmxxx all of m equal M
-			u32 m = ((1 << p->s) - 1) << (MSB_N - p->s);
-			return (((p->d >> MSB_N & 1 ? ~p->d : p->d) & m) != 0) << LV;
+	if constexpr ((DM & 0xf) == CSL) {
+		if (s && (d >> ((8 << S) - s) & 1)) sr |= MC;
+		else sr &= ~MC;
+	}
+	if constexpr ((DM & 0xf) == CSR) {
+		if (s && (d >> (s - 1) & 1)) sr |= MC;
+		else sr &= ~MC;
+	}
+	if constexpr ((DM & 0xf0) == V0)
+		sr &= ~MV;
+	if constexpr ((DM & 0xf0) == V1)
+		sr |= MV;
+	if constexpr ((DM & 0xf0) == VADD) {
+		if (((s & d & ~r) | (~s & ~d & r)) >> MSB_N & 1) sr |= MV;
+		else sr &= ~MV;
+	}
+	if constexpr ((DM & 0xf0) == VSUB) {
+		if (((~s & d & ~r) | (s & ~d & r)) >> MSB_N & 1) sr |= MV;
+		else sr &= ~MV;
+	}
+	if constexpr ((DM & 0xf0) == VSL) {
+	// ex) count=4,bits=8  V=0 if Mmmmmxxx all of m equal M
+		u32 m = ((1 << s) - 1) << (MSB_N - s);
+		if (((d >> MSB_N & 1 ? ~d : d) & m) != 0) sr |= MV;
+		else sr &= ~MV;
+	}
+	if constexpr ((DM & 0xf00) == Z0)
+		sr &= ~MZ;
+	if constexpr ((DM & 0xf00) == ZS) {
+		if (r & u32((1LL << (8 << S)) - 1)) sr &= ~MZ;
+		else sr |= MZ;
+	}
+	if constexpr ((DM & 0xf00) == ZSX)
+		if (r & u32((1LL << (8 << S)) - 1)) sr &= ~MZ;
+	if constexpr ((DM & 0xf00) == ZBF) {
+		if (r & (1LL << s) - 1) sr &= ~MZ;
+		else sr |= MZ;
+	}
+	if constexpr ((DM & 0xf000) == N0)
+		sr &= ~MN;
+	if constexpr ((DM & 0xf000) == NS) {
+		if (r >> MSB_N & 1) sr |= MN;
+		else sr &= ~MN;
+	}
+	if constexpr ((DM & 0xf000) == NBF) {
+		if (r >> (s - 1) & 1) sr |= MN;
+		else sr &= ~MN;
+	}
+	if constexpr ((DM & 0xf0000) == XADD) {
+		if (((s & d) | (~r & d) | (s & ~r)) >> MSB_N & 1) sr |= MX | MC;
+		else sr &= ~(MX | MC);
+	}
+	if constexpr ((DM & 0xf0000) == XSUB) {
+		if (((s & ~d) | (r & ~d) | (s & r)) >> MSB_N & 1) sr |= MX | MC;
+		else sr &= ~(MX | MC);
+	}
+	if constexpr ((DM & 0xf0000) == XSL) {
+		if (s) {
+			if (d >> ((8 << S) - s) & 1) sr |= MX | MC;
+			else sr &= ~(MX | MC);
 		}
-		default:
-			error();
-			break;
+		else sr &= ~MC;
 	}
-	return 0;
-}
-
-int Tiny68020::ResolvZ() {
-	u32 sw = 0;
-	FlagDecision *p;
-	for (p = fp - 1; p >= fbuf && (!(sw = p->dm & 0xf00) || (sw == ZSX && IS0)); p--)
-		;
-	if (p < fbuf) error();
-	switch (sw >> 8) {
-		case F0: case FSX:
-			break;
-		case FB:
-			return p->r & MZ;
-		case FS:
-			return IS0 << LZ;
-		case FMUL:
-			return (!p->s || !p->d) << LZ; // not use p->r because it's 32bit
-		case FBF:
-			return !(p->r & (1LL << p->size) - 1) << LZ;
-		default:
-			error();
-			break;
+	if constexpr ((DM & 0xf0000) == XXL) {
+		if (s) {
+			if (d >> ((8 << S) - s) & 1) sr |= MX | MC;
+			else sr &= ~(MX | MC);
+		}
+		else if (sr & MX) sr |= MC;
+		else sr &= ~MC;
 	}
-	return 0;
-}
-
-int Tiny68020::ResolvN() {
-	u32 sw = 0;
-	FlagDecision *p;
-	for (p = fp - 1; p >= fbuf && !(sw = p->dm & 0xf000); p--)
-		;
-	if (p < fbuf) error();
-	switch (sw >> 12) {
-		case F0:
-			break;
-		case FB:
-			return p->r & MN;
-		case FS:
-			return (p->r >> MSB_N & 1) << LN;
-		case FMUL:
-			return (p->r >> 31 & 1) << LN;
-		case FBF:
-			return (p->r >> (p->size - 1) & 1) << LN;
-		default:
-			error();
-			break;
+	if constexpr ((DM & 0xf0000) == XSR) {
+		if (s) {
+			if (d >> (s - 1) & 1) sr |= MX | MC;
+			else sr &= ~(MX | MC);
+		}
+		else sr &= ~MC;
 	}
-	return 0;
-}
-
-int Tiny68020::ResolvX() {
-	u32 sw = 0;
-	FlagDecision *p;
-	for (p = fp - 1; p >= fbuf && (!(sw = p->dm & 0xf0000) || (sw >= XSFTROT && !p->s)); p--)
-		;
-	if (p < fbuf) error();
-	switch (sw >> 16) {
-		case F0:
-			break;
-		case FB:
-			return p->r & MX;
-		case FADD:
-			return (((p->s & p->d) | (~p->r & p->d) | (p->s & ~p->r)) >> MSB_N & 1) << LX;
-		case FSUB:
-			return (((p->s & ~p->d) | (p->r & ~p->d) | (p->s & p->r)) >> MSB_N & 1) << LX;
-		case FSL:
-			return (p->d >> ((8 << p->size) - p->s) & 1) << LX;
-		case FSR:
-			return (p->d >> (p->s - 1) & 1) << LX;
-		case FBCD:
-			return (p->s != 0) << LX;
-		default:
-			error();
-			break;
+	if constexpr ((DM & 0xf0000) == XXR) {
+		if (s) {
+			if (d >> (s - 1) & 1) sr |= MX | MC;
+			else sr &= ~(MX | MC);
+		}
+		else if (sr & MX) sr |= MC;
+		else sr &= ~MC;
 	}
-	return 0;
-}
-
-void Tiny68020::SetupFlags(int x) {
-	fp = fbuf;
-	fp->dm = XB | NB | ZB | VB | CB;
-	fp++->r = x;
-}
-
-int Tiny68020::ResolvFlags() {
-	int r = ResolvX() | ResolvN() | ResolvZ() | ResolvV() | ResolvC();
-	SetupFlags(r);
+	if constexpr ((DM & 0xf0000) == XBCD) {
+		if (s) sr |= MX | MC;
+		else sr &= ~(MX | MC);
+	}
 	return r;
+}
+
+template<int S, typename T> Tiny68020::u32 Tiny68020::fmul(u64 r) {
+	sr &= ~MC;
+	if (r) sr &= ~MZ;
+	else sr |= MZ;
+	if constexpr (!std::is_same_v<T, void>) {
+		if (r != (T)r) sr |= MV;
+		else sr &= ~MV;
+	}
+	if (r >> MSB_N & 1) sr |= MN;
+	else sr &= ~MN;
+	return (u32)r;
 }
 
 #if TINY68020_TRACE

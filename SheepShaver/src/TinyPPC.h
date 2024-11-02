@@ -26,7 +26,7 @@ class TinyPPC {
 	using u32 = uint32_t;
 	using s64 = int64_t;
 	using u64 = uint64_t;
-	enum { MSB = 0x80000000U, MSD = 0xf0000000U };
+	static constexpr u32 MSB = 0x80000000U, MSD = 0xf0000000U;
 	union FPR { u64 i; double f; };
 public:
 	TinyPPC();

@@ -190,6 +190,14 @@ void m68k_emulop(uae_u32 opcode)
 
 int m68k_do_specialties(void)
 {
+	if (SPCFLAGS_TEST(SPCFLAG_DOTRACE)) {
+		SPCFLAGS_CLEAR(SPCFLAG_DOTRACE);
+		tiny68020.Trace();
+	}
+	if (SPCFLAGS_TEST(SPCFLAG_TRACE)) {
+		SPCFLAGS_CLEAR(SPCFLAG_TRACE);
+		SPCFLAGS_SET(SPCFLAG_DOTRACE);
+	}
 	if (SPCFLAGS_TEST( SPCFLAG_DOINT )) {
 		SPCFLAGS_CLEAR( SPCFLAG_DOINT );
 		int intr = intlev();

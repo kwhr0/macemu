@@ -2,15 +2,14 @@
 // Copyright 2023-2024 © Yasuo Kuwahara
 // MIT License
 
+// Do not use "-Ofast" or floating point operations may be inaccurate.
+
 #include "TinyPPC.h"
 #include "sysdeps.h"		// SheepShaver
 #include "spcflags.hpp"		// SheepShaver
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
-#if TINYPPC_TRACE
-#include <string>
-#endif
 
 #define P(x)			(cnv.pmf = &TinyPPC::x, cnv.p)
 #define PI(x, i)		(cnv.pmf = &TinyPPC::x<i>, cnv.p)
@@ -307,14 +306,14 @@ template<int M> void TinyPPC::addsub(u32 op) {
 }
 
 template<int M> void TinyPPC::mul(u32 op) {
-	u32 a = rA(op), b, v;
-	if constexpr ((M & 0xc) == 0x0) v = (s64)(s32)a * (s32)rB(op) >> 32; // mulhw
-	if constexpr ((M & 0xc) == 0x4) v = (u64)a * rB(op) >> 32; // mulhwu
-	if constexpr ((M & 0xc) == 0x8) v = u32((s64)(s32)a * (s16)op); // mulli
-	if constexpr ((M & 0xc) == 0xc) v = u32((u64)a * (b = rB(op))); // mullw
-	if constexpr ((M & 2) != 0) update_ov((a ^ b ^ v) & MSB); // mullwo[.] only
-	if constexpr (M & 1) update_cr0(v);
-	stD(op, v);
+	s64 a = (s32)rA(op), v;
+	if constexpr ((M & 0xc) == 0x0) v = a * (s32)rB(op) >> 32; // mulhw
+	if constexpr ((M & 0xc) == 0x4) v = (u64)(u32)a * rB(op) >> 32; // mulhwu
+	if constexpr ((M & 0xc) == 0x8) v = a * (s16)op; // mulli
+	if constexpr ((M & 0xc) == 0xc) v = a * (s32)rB(op); // mullw
+	if constexpr ((M & 2) != 0) update_ov(v != (s32)v); // mullwo[.] only
+	if constexpr (M & 1) update_cr0((u32)v);
+	stD(op, (u32)v);
 }
 
 template<int M, typename T> void TinyPPC::div(u32 op) {
@@ -544,9 +543,7 @@ void TinyPPC::mfspr(u32 op) {
 		case pr(1): stD(op, xer); return;
 		case pr(8): stD(op, lr); return;
 		case pr(9): stD(op, ctr); return;
-		default: fprintf(stderr, "mfspr: unimplemented SPR\n"); break;
 	}
-	StopTrace();
 }
 
 void TinyPPC::mftb(u32 op) {
@@ -561,9 +558,7 @@ void TinyPPC::mtspr(u32 op) {
 		case pr(1): xer = rS(op) & 0xe000007f; return;
 		case pr(8): lr = rS(op); return;
 		case pr(9): ctr = rS(op); return;
-		default: fprintf(stderr, "mtspr: unimplemented SPR\n"); break;
 	}
-	StopTrace();
 }
 
 void TinyPPC::Execute() {
@@ -582,11 +577,12 @@ void TinyPPC::Execute() {
 		if (++tracep >= tracebuf + TRACEMAX) tracep = tracebuf;
 #endif
 #endif
-	} while (spcflags_empty() || check_spcflags(this)); // SheepShaver
+	} while (!spcflags_mask || check_spcflags(this)); // SheepShaver
 }
 
-void TinyPPC::StopTrace() {
 #if TINYPPC_TRACE
+#include <string>
+void TinyPPC::StopTrace() {
 	TraceBuffer *endp = tracep;
 	int i = 0;
 	FILE *fo;
@@ -633,13 +629,15 @@ void TinyPPC::StopTrace() {
 	} while (tracep != endp);
 	fclose(fo);
 	fprintf(stderr, "trace dumped.\n");
-#endif
 	exit(1);
 }
+#endif
 
 void TinyPPC::undef(u32 op) {
 	fprintf(stderr, "undefined instruction: %08x\n", op);
+#if TINYPPC_TRACE
 	StopTrace();
+#endif
 }
 
 // ---- for SheepShaver

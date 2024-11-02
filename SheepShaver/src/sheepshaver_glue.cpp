@@ -613,7 +613,9 @@ sigsegv_return_t sigsegv_handler(sigsegv_info_t *sip)
 		// Ignore all other faults, if requested
 		if (PrefsFindBool("ignoresegv"))
 			return SIGSEGV_RETURN_SKIP_INSTRUCTION;
+#if TINYPPC_TRACE
 		ppc_cpu->tinyppc.StopTrace();
+#endif
 	}
 #else
 #error "FIXME: You don't have the capability to skip instruction within signal handlers"
