@@ -1,5 +1,5 @@
 // Tiny68020
-// Copyright 2021-2024 © Yasuo Kuwahara
+// Copyright 2021-2025 © Yasuo Kuwahara
 // MIT License
 
 #include <cstdint>

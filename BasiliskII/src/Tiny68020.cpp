@@ -1,5 +1,5 @@
 // Tiny68020
-// Copyright 2021-2024 © Yasuo Kuwahara
+// Copyright 2021-2025 © Yasuo Kuwahara
 // MIT License
 
 #include "Tiny68020.h"
@@ -698,9 +698,6 @@ void Tiny68020::Execute() {
 		if (++tracep >= tracebuf + TRACEMAX) tracep = tracebuf;
 #endif
 #endif
-#ifdef CURMPU
-		break;
-#endif
 	} while (!spcflags || !m68k_do_specialties()); // BasiliskII
 }
 
@@ -725,118 +722,42 @@ template<int C> int Tiny68020::cond() {
 
 // M68000PRM.pdf page 3-18
 
-#define MSB_N	((8 << S) - 1)
+#define BITS	(8 << S)
+#define MSB_N	(BITS - 1)
+#define MXC		(MX | MC)
 
 template<int DM, int S> Tiny68020::u32 Tiny68020::fset(u32 r, u32 s, u32 d) {
-	if constexpr ((DM & 0xf) == C0)
-		sr &= ~MC;
-	if constexpr ((DM & 0xf) == CSUB) {
-		if (((s & ~d) | (r & ~d) | (s & r)) >> MSB_N & 1) sr |= MC;
-		else sr &= ~MC;
-	}
-	if constexpr ((DM & 0xf) == CSL) {
-		if (s && (d >> ((8 << S) - s) & 1)) sr |= MC;
-		else sr &= ~MC;
-	}
-	if constexpr ((DM & 0xf) == CSR) {
-		if (s && (d >> (s - 1) & 1)) sr |= MC;
-		else sr &= ~MC;
-	}
-	if constexpr ((DM & 0xf0) == V0)
-		sr &= ~MV;
-	if constexpr ((DM & 0xf0) == V1)
-		sr |= MV;
-	if constexpr ((DM & 0xf0) == VADD) {
-		if (((s & d & ~r) | (~s & ~d & r)) >> MSB_N & 1) sr |= MV;
-		else sr &= ~MV;
-	}
-	if constexpr ((DM & 0xf0) == VSUB) {
-		if (((~s & d & ~r) | (s & ~d & r)) >> MSB_N & 1) sr |= MV;
-		else sr &= ~MV;
-	}
-	if constexpr ((DM & 0xf0) == VSL) {
-	// ex) count=4,bits=8  V=0 if Mmmmmxxx all of m equal M
-		u32 m = ((1 << s) - 1) << (MSB_N - s);
-		if (((d >> MSB_N & 1 ? ~d : d) & m) != 0) sr |= MV;
-		else sr &= ~MV;
-	}
-	if constexpr ((DM & 0xf00) == Z0)
-		sr &= ~MZ;
-	if constexpr ((DM & 0xf00) == ZS) {
-		if (r & u32((1LL << (8 << S)) - 1)) sr &= ~MZ;
-		else sr |= MZ;
-	}
-	if constexpr ((DM & 0xf00) == ZSX)
-		if (r & u32((1LL << (8 << S)) - 1)) sr &= ~MZ;
-	if constexpr ((DM & 0xf00) == ZBF) {
-		if (r & (1LL << s) - 1) sr &= ~MZ;
-		else sr |= MZ;
-	}
-	if constexpr ((DM & 0xf000) == N0)
-		sr &= ~MN;
-	if constexpr ((DM & 0xf000) == NS) {
-		if (r >> MSB_N & 1) sr |= MN;
-		else sr &= ~MN;
-	}
-	if constexpr ((DM & 0xf000) == NBF) {
-		if (r >> (s - 1) & 1) sr |= MN;
-		else sr &= ~MN;
-	}
-	if constexpr ((DM & 0xf0000) == XADD) {
-		if (((s & d) | (~r & d) | (s & ~r)) >> MSB_N & 1) sr |= MX | MC;
-		else sr &= ~(MX | MC);
-	}
-	if constexpr ((DM & 0xf0000) == XSUB) {
-		if (((s & ~d) | (r & ~d) | (s & r)) >> MSB_N & 1) sr |= MX | MC;
-		else sr &= ~(MX | MC);
-	}
-	if constexpr ((DM & 0xf0000) == XSL) {
-		if (s) {
-			if (d >> ((8 << S) - s) & 1) sr |= MX | MC;
-			else sr &= ~(MX | MC);
-		}
-		else sr &= ~MC;
-	}
-	if constexpr ((DM & 0xf0000) == XXL) {
-		if (s) {
-			if (d >> ((8 << S) - s) & 1) sr |= MX | MC;
-			else sr &= ~(MX | MC);
-		}
-		else if (sr & MX) sr |= MC;
-		else sr &= ~MC;
-	}
-	if constexpr ((DM & 0xf0000) == XSR) {
-		if (s) {
-			if (d >> (s - 1) & 1) sr |= MX | MC;
-			else sr &= ~(MX | MC);
-		}
-		else sr &= ~MC;
-	}
-	if constexpr ((DM & 0xf0000) == XXR) {
-		if (s) {
-			if (d >> (s - 1) & 1) sr |= MX | MC;
-			else sr &= ~(MX | MC);
-		}
-		else if (sr & MX) sr |= MC;
-		else sr &= ~MC;
-	}
-	if constexpr ((DM & 0xf0000) == XBCD) {
-		if (s) sr |= MX | MC;
-		else sr &= ~(MX | MC);
-	}
+	if constexpr ((DM & 0xf) == C0) sr &= ~MC;
+	if constexpr ((DM & 0xf) == CSUB) sr = ((s & ~d) | (r & ~d) | (s & r)) >> MSB_N & 1 ? sr | MC : sr & ~MC;
+	if constexpr ((DM & 0xf) == CSL) sr = s && (d >> (BITS - s) & 1) ? sr | MC : sr & ~MC;
+	if constexpr ((DM & 0xf) == CSR) sr = s && (d >> (s - 1) & 1) ? sr | MC : sr & ~MC;
+	if constexpr ((DM & 0xf0) == V0) sr &= ~MV;
+	if constexpr ((DM & 0xf0) == V1) sr |= MV;
+	if constexpr ((DM & 0xf0) == VADD) sr = ((s & d & ~r) | (~s & ~d & r)) >> MSB_N & 1 ? sr | MV : sr & ~MV;
+	if constexpr ((DM & 0xf0) == VSUB) sr = ((~s & d & ~r) | (s & ~d & r)) >> MSB_N & 1 ? sr | MV : sr & ~MV;
+	if constexpr ((DM & 0xf0) == VSL) sr = (r >> MSB_N & 1 ? ~r : r) >> (BITS - s) ? sr | MV : sr & ~MV;
+	if constexpr ((DM & 0xf00) == Z0) sr &= ~MZ;
+	if constexpr ((DM & 0xf00) == ZS) sr = r & u32((1LL << BITS) - 1) ? sr & ~MZ : sr | MZ;
+	if constexpr ((DM & 0xf00) == ZSX) sr = r & u32((1LL << BITS) - 1) ? sr & ~MZ : sr;
+	if constexpr ((DM & 0xf00) == ZBF) sr = r & (1LL << s) - 1 ? sr & ~MZ : sr | MZ;
+	if constexpr ((DM & 0xf000) == N0) sr &= ~MN;
+	if constexpr ((DM & 0xf000) == NS) sr = r >> MSB_N & 1 ? sr | MN : sr & ~MN;
+	if constexpr ((DM & 0xf000) == NBF) sr = r >> (s - 1) & 1 ? sr | MN : sr & ~MN;
+	if constexpr ((DM & 0xf0000) == XADD) sr = ((s & d) | (~r & d) | (s & ~r)) >> MSB_N & 1 ? sr | MXC : sr & ~MXC;
+	if constexpr ((DM & 0xf0000) == XSUB) sr = ((s & ~d) | (r & ~d) | (s & r)) >> MSB_N & 1 ? sr | MXC : sr & ~MXC;
+	if constexpr ((DM & 0xf0000) == XSL) sr = s ? d >> (BITS - s) & 1 ? sr | MXC : sr & ~MXC : sr & ~MC;
+	if constexpr ((DM & 0xf0000) == XXL) sr = s ? d >> (BITS - s) & 1 ? sr | MXC : sr & ~MXC : sr & MX ? sr | MC : sr & ~MC;
+	if constexpr ((DM & 0xf0000) == XSR) sr = s ? d >> (s - 1) & 1 ? sr | MXC : sr & ~MXC : sr & ~MC;
+	if constexpr ((DM & 0xf0000) == XXR) sr = s ? d >> (s - 1) & 1 ? sr | MXC : sr & ~MXC : sr & MX ? sr | MC : sr & ~MC;
+	if constexpr ((DM & 0xf0000) == XBCD) sr = s ? sr | MXC : sr & ~MXC;
 	return r;
 }
 
 template<int S, typename T> Tiny68020::u32 Tiny68020::fmul(u64 r) {
 	sr &= ~MC;
-	if (r) sr &= ~MZ;
-	else sr |= MZ;
-	if constexpr (!std::is_same_v<T, void>) {
-		if (r != (T)r) sr |= MV;
-		else sr &= ~MV;
-	}
-	if (r >> MSB_N & 1) sr |= MN;
-	else sr &= ~MN;
+	sr = r ? sr & ~MZ : sr | MZ;
+	if constexpr (!std::is_same_v<T, void>) sr = r != (T)r ? sr | MV : sr & ~MV;
+	sr = r >> MSB_N & 1 ? sr | MN : sr & ~MN;
 	return (u32)r;
 }
 
